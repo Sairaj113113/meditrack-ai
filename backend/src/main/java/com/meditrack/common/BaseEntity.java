@@ -28,4 +28,7 @@ public abstract class BaseEntity {
 
     @Column(nullable = false)
     private Boolean isDeleted = false;
+
+    @Column
+private LocalDateTime deletedAt;
 }
