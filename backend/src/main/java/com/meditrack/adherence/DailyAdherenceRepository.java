@@ -1,1 +1,14 @@
-// placeholder 
+package com.meditrack.adherence;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Optional;
+
+public interface DailyAdherenceRepository extends JpaRepository<DailyAdherence, String> {
+
+    Optional<DailyAdherence> findByUserIdAndDate(String userId, LocalDate date);
+
+    List<DailyAdherence> findByUserIdAndDateBetweenOrderByDateAsc(
+            String userId, LocalDate startDate, LocalDate endDate);
+}

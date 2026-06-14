@@ -1,8 +1,4 @@
 package com.meditrack.enums;
-
 public enum DiseaseSeverity {
-    LOW,
-    MEDIUM,
-    HIGH,
-    CRITICAL
+    LOW, MEDIUM, HIGH, CRITICAL
 }
