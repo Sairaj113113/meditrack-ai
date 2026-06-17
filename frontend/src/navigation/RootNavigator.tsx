@@ -1,5 +1,4 @@
 import React, { useEffect } from "react";
-import { ActivityIndicator, View } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 
 import AuthNavigator from "./AuthNavigator";
@@ -8,29 +7,27 @@ import AppNavigator from "./AppNavigator";
 import { useAuthStore } from "../store/authStore";
 
 export default function RootNavigator() {
-  const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
+  const {
+    isAuthenticated,
+    isLoading,
+    checkAuth,
+  } = useAuthStore();
 
   useEffect(() => {
     checkAuth();
   }, []);
 
   if (isLoading) {
-    return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: "center",
-          alignItems: "center",
-        }}
-      >
-        <ActivityIndicator size="large" />
-      </View>
-    );
+    return null;
   }
 
   return (
     <NavigationContainer>
-      {isAuthenticated ? <AppNavigator /> : <AuthNavigator />}
+      {isAuthenticated ? (
+        <AppNavigator />
+      ) : (
+        <AuthNavigator />
+      )}
     </NavigationContainer>
   );
 }

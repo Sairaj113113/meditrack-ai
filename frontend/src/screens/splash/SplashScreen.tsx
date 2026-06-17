@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Dimensions } from 'react-native';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { useNavigation } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
 const { width, height } = Dimensions.get('window');
 
@@ -30,9 +32,49 @@ export default function SplashScreen() {
     return () => clearInterval(interval);
   }, []);
 
-  const handlePlaybackStatusUpdate = (status: AVPlaybackStatus) => {
-  if (status.isLoaded && status.didJustFinish) {
-    navigation.replace('Onboarding1');
+  const handlePlaybackStatusUpdate = async (
+  status: AVPlaybackStatus
+) => {
+  if (
+    status.isLoaded &&
+    status.didJustFinish
+  ) {
+    try {
+
+      const onboardingCompleted =
+        await AsyncStorage.getItem(
+          'onboarding_completed'
+        );
+
+      const accessToken =
+        await SecureStore.getItemAsync(
+          'accessToken'
+        );
+
+      if (!onboardingCompleted) {
+        navigation.replace(
+          'Onboarding1'
+        );
+        return;
+      }
+
+      if (accessToken) {
+        navigation.replace(
+          'MainTabs'
+        );
+        return;
+      }
+
+      navigation.replace('Login');
+
+    } catch (error) {
+      console.log(
+        'Splash Error:',
+        error
+      );
+
+      navigation.replace('Login');
+    }
   }
 };
 

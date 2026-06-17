@@ -16,14 +16,22 @@ export default function Onboarding5Screen() {
   const navigation = useNavigation<any>();
 
   const handleGetStarted = async () => {
-    try {
-      await AsyncStorage.setItem('onboarding_completed', 'true');
-      navigation.replace('Login');
-    } catch (error) {
-      console.log('Error saving onboarding status:', error);
-      navigation.replace('Login');
-    }
-  };
+  try {
+    await AsyncStorage.setItem(
+      'onboarding_completed',
+      'true'
+    );
+
+    navigation.replace('Login');
+  } catch (error) {
+    console.log(
+      'Error saving onboarding status:',
+      error
+    );
+
+    navigation.replace('Login');
+  }
+};
 
   return (
     <View style={styles.container}>

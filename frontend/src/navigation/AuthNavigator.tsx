@@ -11,7 +11,6 @@ import LoginScreen from "../screens/auth/LoginScreen";
 import RegisterScreen from "../screens/auth/RegisterScreen";
 import OtpVerificationScreen from "../screens/auth/OtpVerificationScreen";
 
-
 const Stack = createNativeStackNavigator();
 
 export default function AuthNavigator() {
@@ -30,8 +29,10 @@ export default function AuthNavigator() {
       <Stack.Screen name="Onboarding5" component={Onboarding5Screen} />
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="Register" component={RegisterScreen} />
-      <Stack.Screen name="OtpVerification" component={OtpVerificationScreen} />
-    
+      <Stack.Screen
+        name="OtpVerification"
+        component={OtpVerificationScreen}
+      />
     </Stack.Navigator>
   );
 }
