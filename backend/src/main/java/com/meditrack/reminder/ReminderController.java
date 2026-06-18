@@ -1,11 +1,15 @@
 package com.meditrack.reminder;
 
+import com.meditrack.common.ApiResponse;
+import com.meditrack.user.User;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/reminders")
@@ -15,128 +19,58 @@ public class ReminderController {
     private final ReminderService reminderService;
 
     @GetMapping("/today")
-    public ResponseEntity<List<ReminderResponseDTO>> getTodayReminders() {
-
-        return ResponseEntity.ok(
-                reminderService.getTodayReminders()
-        );
+    public ResponseEntity<ApiResponse<List<ReminderResponseDTO>>> getTodayReminders(
+            @AuthenticationPrincipal User user) {
+        List<ReminderResponseDTO> response = reminderService.getTodayReminders(user.getId());
+        return ResponseEntity.ok(ApiResponse.<List<ReminderResponseDTO>>builder()
+                .success(true).message("Success").data(response).build());
     }
 
     @GetMapping("/history")
-    public ResponseEntity<List<ReminderResponseDTO>> getReminderHistory() {
-
-        return ResponseEntity.ok(
-                reminderService.getReminderHistory()
-        );
-    }
-
-    @GetMapping("/session/{id}")
-    public ResponseEntity<ReminderResponseDTO> getReminderSession(
-            @PathVariable String id
-    ) {
-
-        return ResponseEntity.ok(
-                reminderService.getReminderSession(id)
-        );
-    }
-
-    @PostMapping("/session/{id}/taken-all")
-    public ResponseEntity<String> markAllTaken(
-            @PathVariable String id
-    ) {
-
-        reminderService.markAllTaken(id);
-
-        return ResponseEntity.ok("All medicines marked as taken");
-    }
-
-    @PostMapping("/session/{id}/skip-all")
-    public ResponseEntity<String> markAllSkipped(
-            @PathVariable String id,
-            @RequestBody ReminderRequestDTO request
-    ) {
-
-        reminderService.markAllSkipped(
-                id,
-                request.getSkipReason()
-        );
-
-        return ResponseEntity.ok("All medicines marked as skipped");
-    }
-
-    @PostMapping("/session/{id}/snooze")
-    public ResponseEntity<String> snoozeReminder(
-            @PathVariable String id,
-            @RequestBody ReminderRequestDTO request
-    ) {
-
-        reminderService.snoozeReminder(
-                id,
-                request.getMinutes()
-        );
-
-        return ResponseEntity.ok("Reminder snoozed successfully");
-    }
-
-    @PostMapping("/session/{id}/medicines/{medicineId}/taken")
-    public ResponseEntity<UpdateMedicineStatusResponseDTO> markMedicineTaken(
-            @PathVariable String id,
-            @PathVariable String medicineId
-    ) {
-
-        return ResponseEntity.ok(
-                reminderService.markMedicineTaken(
-                        id,
-                        medicineId
-                )
-        );
-    }
-
-    @PostMapping("/session/{id}/medicines/{medicineId}/skip")
-    public ResponseEntity<UpdateMedicineStatusResponseDTO> markMedicineSkipped(
-            @PathVariable String id,
-            @PathVariable String medicineId,
-            @RequestBody ReminderRequestDTO request
-    ) {
-
-        return ResponseEntity.ok(
-                reminderService.markMedicineSkipped(
-                        id,
-                        medicineId,
-                        request.getSkipReason()
-                )
-        );
-    }
-
-    @PostMapping("/session/{id}/medicines/{medicineId}/snooze")
-    public ResponseEntity<UpdateMedicineStatusResponseDTO> snoozeMedicine(
-            @PathVariable String id,
-            @PathVariable String medicineId,
-            @RequestBody ReminderRequestDTO request
-    ) {
-
-        return ResponseEntity.ok(
-                reminderService.snoozeMedicine(
-                        id,
-                        medicineId,
-                        request.getMinutes()
-                )
-        );
+    public ResponseEntity<ApiResponse<List<ReminderResponseDTO>>> getHistory(
+            @AuthenticationPrincipal User user) {
+        List<ReminderResponseDTO> response = reminderService.getReminderHistory(user.getId());
+        return ResponseEntity.ok(ApiResponse.<List<ReminderResponseDTO>>builder()
+                .success(true).message("Success").data(response).build());
     }
 
     @PostMapping("/session/{sessionId}/medicines/{medicineId}/status")
-    public ResponseEntity<UpdateMedicineStatusResponseDTO> updateMedicineStatus(
+    public ResponseEntity<ApiResponse<?>> updateMedicineStatus(
+            @AuthenticationPrincipal User user,
             @PathVariable String sessionId,
             @PathVariable String medicineId,
-            @Valid @RequestBody UpdateMedicineStatusRequestDTO request
-    ) {
+            @Valid @RequestBody UpdateMedicineStatusRequestDTO dto) {
+        reminderService.updateMedicineStatus(sessionId, medicineId, dto);
+        return ResponseEntity.ok(ApiResponse.builder()
+                .success(true).message("Status updated").build());
+    }
 
-        return ResponseEntity.ok(
-                reminderService.updateMedicineStatus(
-                        sessionId,
-                        medicineId,
-                        request
-                )
-        );
+    @PostMapping("/session/{sessionId}/taken-all")
+    public ResponseEntity<ApiResponse<?>> markAllTaken(
+            @AuthenticationPrincipal User user,
+            @PathVariable String sessionId) {
+        reminderService.markAllTaken(sessionId);
+        return ResponseEntity.ok(ApiResponse.builder()
+                .success(true).message("All medicines marked as taken").build());
+    }
+
+    @PostMapping("/session/{sessionId}/skip-all")
+    public ResponseEntity<ApiResponse<?>> markAllSkipped(
+            @AuthenticationPrincipal User user,
+            @PathVariable String sessionId) {
+        reminderService.markAllSkipped(sessionId);
+        return ResponseEntity.ok(ApiResponse.builder()
+                .success(true).message("All medicines skipped").build());
+    }
+
+    @PostMapping("/session/{sessionId}/snooze")
+    public ResponseEntity<ApiResponse<?>> snooze(
+            @AuthenticationPrincipal User user,
+            @PathVariable String sessionId,
+            @RequestBody Map<String, Integer> body) {
+        int minutes = body.getOrDefault("minutes", 10);
+        reminderService.snoozeSession(sessionId, minutes);
+        return ResponseEntity.ok(ApiResponse.builder()
+                .success(true).message("Reminder snoozed for " + minutes + " minutes").build());
     }
 }

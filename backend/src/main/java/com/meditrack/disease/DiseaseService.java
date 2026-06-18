@@ -62,4 +62,23 @@ public class DiseaseService {
 
         diseaseRepository.save(disease);
     }
+
+    // NEW METHOD FOR QUICK MEDICINE
+    public DiseaseDTO createQuickDisease(
+            String userId,
+            String diseaseName
+    ) {
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        UserDisease disease = UserDisease.builder()
+                .user(user)
+                .diseaseName(diseaseName)
+                .build();
+
+        return diseaseMapper.toDTO(
+                diseaseRepository.save(disease)
+        );
+    }
 }

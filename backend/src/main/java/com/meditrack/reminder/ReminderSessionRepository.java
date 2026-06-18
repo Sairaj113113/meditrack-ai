@@ -1,32 +1,19 @@
 package com.meditrack.reminder;
 
-import com.meditrack.enums.ReminderStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Repository;
-
 import java.time.LocalDateTime;
 import java.util.List;
+import com.meditrack.enums.ReminderStatus;
 
-@Repository
-public interface ReminderSessionRepository
-        extends JpaRepository<ReminderSession, String> {
+public interface ReminderSessionRepository extends JpaRepository<ReminderSession, String> {
 
-    List<ReminderSession> findByUser_IdOrderBySessionTimeDesc(String userId);
+    List<ReminderSession> findByUserIdAndScheduledTimeBetween(
+            String userId, LocalDateTime start, LocalDateTime end);
 
-    List<ReminderSession> findByUser_IdAndStatus(
-            String userId,
-            ReminderStatus status
-    );
+    List<ReminderSession> findByUserIdOrderByScheduledTimeDesc(String userId);
 
-    List<ReminderSession> findBySessionTimeBetween(
-            LocalDateTime start,
-            LocalDateTime end
-    );
-
-    List<ReminderSession> findByStatus(ReminderStatus status);
-
-    List<ReminderSession> findByStatusAndSessionTimeLessThanEqual(
-            ReminderStatus status,
-            LocalDateTime sessionTime
-    );
+    List<ReminderSession> findByStatusAndScheduledTimeBefore(
+        ReminderStatus status,
+        LocalDateTime time
+);
 }

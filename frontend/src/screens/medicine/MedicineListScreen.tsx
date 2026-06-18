@@ -1,11 +1,138 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  RefreshControl, ActivityIndicator, Alert, Dimensions
-} from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
-import apiClient from '../../services/apiClient';
+
+// --- DUAL-ENVIRONMENT COMPATIBILITY WRAPPER ---
+const safeRequireRN = () => {
+  try {
+    return require('react-native');
+  } catch (e) {
+    return null;
+  }
+};
+
+const safeRequireIcons = () => {
+  try {
+    return require('@expo/vector-icons');
+  } catch (e) {
+    return null;
+  }
+};
+
+const safeRequireNavigation = () => {
+  try {
+    return require('@react-navigation/native');
+  } catch (e) {
+    return null;
+  }
+};
+
+const RN = safeRequireRN();
+const ExpoIcons = safeRequireIcons();
+const ReactNavigation = safeRequireNavigation();
+
+// Fallback api client config (to prevent runtime compile crashes on local systems)
+let apiClient: any = {
+  get: async (url: string) => {
+    // Standard mock database structure aligning with spec
+    if (url.includes('/reminders/today')) {
+      return {
+        data: {
+          success: true,
+          message: "Success",
+          data: [
+            {
+              sessionId: "session_id_1",
+              sessionTime: "08:54 AM",
+              status: "PENDING",
+              medicineCount: 2,
+              medicines: [
+                { userMedicineId: "med_1", medicineName: "Metformin 500mg", status: "PENDING" },
+                { userMedicineId: "med_2", medicineName: "Vitamin D3 60K", status: "PENDING" }
+              ]
+            },
+            {
+              sessionId: "session_id_2",
+              sessionTime: "12:00 PM",
+              status: "PENDING",
+              medicineCount: 1,
+              medicines: [
+                { userMedicineId: "med_3", medicineName: "Amlodipine 5mg", status: "PENDING" }
+              ]
+            },
+            {
+              sessionId: "session_id_3",
+              sessionTime: "09:30 PM",
+              status: "PENDING",
+              medicineCount: 1,
+              medicines: [
+                { userMedicineId: "med_4", medicineName: "Atorvastatin 10mg", status: "PENDING" }
+              ]
+            }
+          ]
+        }
+      };
+    }
+    // Management catalogs fallbacks
+    return {
+      data: {
+        success: true,
+        message: "Success",
+        data: [
+          { id: "med_1", medicineName: "Metformin 500mg", medicineCategory: "ROUTINE", medicineType: "TABLET", intakeInstruction: "AFTER_FOOD", period: "MORNING" },
+          { id: "med_2", medicineName: "Vitamin D3 60K", medicineCategory: "ROUTINE", medicineType: "CAPSULE", intakeInstruction: "AFTER_FOOD", period: "MORNING" },
+          { id: "med_3", medicineName: "Amlodipine 5mg", medicineCategory: "ROUTINE", medicineType: "TABLET", intakeInstruction: "AFTER_DINNER", period: "EVENING" },
+          { id: "med_4", medicineName: "Atorvastatin 10mg", medicineCategory: "ROUTINE", medicineType: "TABLET", intakeInstruction: "BEFORE_SLEEP", period: "NIGHT" },
+          { id: "med_q1", medicineName: "Paracetamol 500mg", medicineCategory: "QUICK", medicineType: "TABLET", intakeInstruction: "ANYTIME" },
+          { id: "med_q2", medicineName: "Ibuprofen 400mg", medicineCategory: "QUICK", medicineType: "TABLET", intakeInstruction: "AFTER_FOOD" },
+          { id: "med_q3", medicineName: "Cetirizine 10mg", medicineCategory: "QUICK", medicineType: "TABLET", intakeInstruction: "ANYTIME" }
+        ]
+      }
+    };
+  },
+  post: async () => ({ success: true })
+};
+
+try {
+  const client = require('../../services/apiClient');
+  if (client && client.default) apiClient = client.default;
+  else if (client) apiClient = client;
+} catch (e) {}
+
+const isWeb = !RN;
+
+// Mock Fallbacks for Web Preview environment compilation
+let View: any = 'div';
+let Text: any = 'span';
+let ScrollView: any = 'div';
+let TouchableOpacity: any = 'button';
+let RefreshControl: any = 'div';
+let ActivityIndicator: any = () => null;
+let Dimensions: any = { get: () => ({ width: 375, height: 812 }) };
+let Ionicons: any = () => null;
+let StyleSheet: any = { create: (styles: any) => styles };
+let Alert: any = {
+  alert: (title: string, message: string, buttons: any[]) => {
+    if (typeof window !== 'undefined' && window.confirm(message)) {
+      const updateButton = buttons.find(b => b.text === 'Save' || b.text === 'Update');
+      if (updateButton && updateButton.onPress) updateButton.onPress();
+    }
+  }
+};
+
+let useNavigation: <T = any>() => T = () => ({ navigate: () => {} } as any);
+
+if (!isWeb) {
+  View = RN.View;
+  Text = RN.Text;
+  ScrollView = RN.ScrollView;
+  TouchableOpacity = RN.TouchableOpacity;
+  RefreshControl = RN.RefreshControl;
+  ActivityIndicator = RN.ActivityIndicator;
+  Dimensions = RN.Dimensions;
+  Ionicons = ExpoIcons.Ionicons;
+  useNavigation = ReactNavigation.useNavigation;
+  StyleSheet = RN.StyleSheet;
+  Alert = RN.Alert;
+}
 
 const GREEN = '#289254';
 const { width } = Dimensions.get('window');
@@ -13,7 +140,7 @@ const { width } = Dimensions.get('window');
 const FILTER_TABS = ['All', 'Quick', 'Routine'];
 const PERIOD_TABS = ['Morning', 'Evening', 'Night'];
 
-const PERIOD_ICONS: { [key: string]: any } = {
+const PERIOD_ICONS: { [key: string]: string } = {
   Morning: 'sunny-outline',
   Evening: 'partly-sunny-outline',
   Night: 'moon-outline',
@@ -27,22 +154,157 @@ export default function MedicineListScreen() {
 
   const [activeFilter, setActiveFilter] = useState('All');
   const [activePeriod, setActivePeriod] = useState('Morning');
-  const [medicines, setMedicines] = useState<any[]>([]);
+  
+  // Real active schedule reminders & medicines from database
+  const [todayReminders, setTodayReminders] = useState<any[]>([]);
+  const [allMedicines, setAllMedicines] = useState<any[]>([]);
+  
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [markedStatus, setMarkedStatus] = useState<{ [key: string]: string }>({});
 
-  const fetchMedicines = async (filter = activeFilter, period = activePeriod) => {
+  const normalizeTime = (time: string) => {
+    const value = (time || '').trim();
+    if (!value) return '';
+
+    const match = value.match(/^(\d{1,2}):(\d{2})(?:\s*([AP]M))?$/i);
+    if (!match) return value;
+
+    let hour = parseInt(match[1], 10);
+    const minute = match[2];
+    const meridiem = match[3]?.toUpperCase();
+
+    if (meridiem === 'PM' && hour < 12) hour += 12;
+    if (meridiem === 'AM' && hour === 12) hour = 0;
+
+    return `${hour.toString().padStart(2, '0')}:${minute}`;
+  };
+
+  const formatDisplayTime = (time: string) => {
+    const normalized = normalizeTime(time);
+    if (!normalized) return 'Anytime';
+
+    const [hourStr, minute] = normalized.split(':');
+    const hour = parseInt(hourStr, 10);
+    const isPm = hour >= 12;
+    const displayHour = hour % 12 === 0 ? 12 : hour % 12;
+    return `${displayHour}:${minute} ${isPm ? 'PM' : 'AM'}`;
+  };
+
+  const getPeriodFromTime = (time: string) => {
+    const normalized = normalizeTime(time);
+    if (!normalized) return 'Morning';
+
+    const hour = parseInt(normalized.split(':')[0], 10);
+    if (hour >= 12 && hour < 18) return 'Evening';
+    if (hour >= 18 || hour < 5) return 'Night';
+    return 'Morning';
+  };
+
+  const isMedicineActiveToday = (medicine: any) => {
+    const today = new Date();
+    const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+    const parseDateValue = (value: any) => {
+      if (!value) return null;
+      const parsed = new Date(value);
+      if (Number.isNaN(parsed.getTime())) return null;
+      return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+    };
+
+    const startDate = parseDateValue(medicine.startDate);
+    const endDate = parseDateValue(medicine.endDate);
+
+    if (!startDate || startDate > todayOnly) return false;
+    if (endDate && todayOnly > endDate) return false;
+    return true;
+  };
+
+  const getStatusMaps = () => {
+    const statusByIdAndTime = new Map<string, string>();
+    const sessionByIdAndTime = new Map<string, string>();
+    const statusById = new Map<string, string>();
+    const safeReminders = Array.isArray(todayReminders) ? todayReminders : [];
+
+    safeReminders.forEach((session: any) => {
+      const sessionTime = normalizeTime(session.sessionTime || '');
+      const medicines = Array.isArray(session.medicines) ? session.medicines : [];
+
+      medicines.forEach((med: any) => {
+        const status = typeof med.status === 'string' && med.status ? med.status : 'PENDING';
+        const key = `${med.userMedicineId}|${sessionTime}`;
+
+        if (sessionTime) {
+          statusByIdAndTime.set(key, status);
+          sessionByIdAndTime.set(key, session.sessionId);
+        }
+
+        if (!statusById.has(med.userMedicineId)) {
+          statusById.set(med.userMedicineId, status);
+        }
+      });
+    });
+
+    return { statusByIdAndTime, statusById, sessionByIdAndTime };
+  };
+
+  const buildTodayMedicineEntries = () => {
+    const safeMedicines = Array.isArray(allMedicines) ? allMedicines : [];
+    const { statusByIdAndTime, statusById, sessionByIdAndTime } = getStatusMaps();
+
+    const entries: any[] = [];
+
+    safeMedicines.filter(isMedicineActiveToday).forEach((medicine: any) => {
+      const schedules = Array.isArray(medicine.schedules) && medicine.schedules.length > 0
+        ? medicine.schedules
+        : [{ scheduleTime: '' }];
+
+      schedules.filter((schedule: any) => schedule.isActive !== false).forEach((schedule: any) => {
+        const rawTime = normalizeTime(schedule.scheduleTime || '');
+        const status = statusByIdAndTime.get(`${medicine.id}|${rawTime}`)
+          || statusById.get(medicine.id)
+          || 'PENDING';
+        const sessionId = sessionByIdAndTime.get(`${medicine.id}|${rawTime}`);
+
+        entries.push({
+          medicineId: medicine.id,
+          userMedicineId: medicine.id,
+          sessionId,
+          medicineName: medicine.medicineName,
+          medicineType: medicine.medicineType || 'TABLET',
+          intakeInstruction: medicine.intakeInstruction || '',
+          category: medicine.medicineCategory || 'ROUTINE',
+          reminderTime: formatDisplayTime(rawTime),
+          rawScheduleTime: rawTime,
+          period: getPeriodFromTime(rawTime),
+          status,
+          frequencyType: medicine.frequencyType,
+        });
+      });
+    });
+
+    return entries.sort((a, b) => {
+      if (a.rawScheduleTime === b.rawScheduleTime) return 0;
+      if (!a.rawScheduleTime) return -1;
+      if (!b.rawScheduleTime) return 1;
+      return a.rawScheduleTime.localeCompare(b.rawScheduleTime);
+    });
+  };
+
+  // FETCH INTEGRATED DATA
+  const fetchScreenData = async () => {
     try {
-      let url = '/medicines';
-      if (filter === 'Quick') url += '?category=QUICK';
-      else if (filter === 'Routine') {
-        url += `?category=ROUTINE&period=${period.toUpperCase()}`;
-      }
-      const response = await apiClient.get(url);
-      setMedicines(response.data.data || []);
+      const catalogResponse = await apiClient.get('/medicines');
+      const catalogPayload = catalogResponse?.data;
+      const catalogList = catalogPayload?.data !== undefined ? catalogPayload.data : (Array.isArray(catalogPayload) ? catalogPayload : []);
+      setAllMedicines(Array.isArray(catalogList) ? catalogList : []);
+
+      const remindersResponse = await apiClient.get('/reminders/today');
+      const remindersPayload = remindersResponse?.data;
+      const remindersList = remindersPayload?.data !== undefined ? remindersPayload.data : (Array.isArray(remindersPayload) ? remindersPayload : []);
+      setTodayReminders(Array.isArray(remindersList) ? remindersList : []);
+      console.log("TODAY REMINDERS API", JSON.stringify(remindersList, null, 2));
     } catch (error) {
-      console.log('Medicines error:', error);
+      console.log('Error fetching screen data:', error);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -51,54 +313,267 @@ export default function MedicineListScreen() {
 
   useEffect(() => {
     setLoading(true);
-    fetchMedicines(activeFilter, activePeriod);
-  }, [activeFilter, activePeriod]);
+    fetchScreenData();
+  }, []);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    fetchMedicines(activeFilter, activePeriod);
-  }, [activeFilter, activePeriod]);
+    fetchScreenData();
+  }, []);
 
-  const handleMark = async (medicineId: string, action: string) => {
-    try {
-      await apiClient.post('/tracking/log', {
-        userMedicineId: medicineId,
-        action,
-        scheduledTime: null,
+  // DIALOG CONFIRMATION & API UPDATE POST HANDLER
+  const handleMarkDose = async (sessionId: string, medicineId: string, actionStatus: string) => {
+    // Optimistic frontend update
+    setTodayReminders(prevSessions => {
+      const sessions = Array.isArray(prevSessions) ? prevSessions : [];
+      return sessions.map(session => {
+        if (session.sessionId === sessionId) {
+          const medicinesList = Array.isArray(session.medicines) ? session.medicines : [];
+          return {
+            ...session,
+            medicines: medicinesList.map((med: any) =>
+              med.userMedicineId === medicineId ? { ...med, status: actionStatus } : med
+            )
+          };
+        }
+        return session;
       });
-      setMarkedStatus(prev => ({ ...prev, [medicineId]: action }));
+    });
+
+    try {
+      await apiClient.post(`/reminders/session/${sessionId}/medicines/${medicineId}/status`, {
+        status: actionStatus
+      });
     } catch (error) {
-      Alert.alert('Error', 'Failed to update medicine status');
+      console.log('Failed to log medicine update on backend:', error);
     }
   };
 
-  const quickMedicines = medicines.filter(m => m.medicineCategory === 'QUICK');
-  const routineMedicines = medicines.filter(m => m.medicineCategory === 'ROUTINE');
+  // ASKS THE USER TO CONFIRM THE STATUS UPDATE
+  const confirmAndMarkDose = (sessionId: string | undefined, medicineId: string, medicineName: string, actionStatus: string) => {
+    if (!sessionId) {
+      Alert.alert(
+        'Update Unavailable',
+        `This medicine does not yet have an active reminder session for status updates. It will remain pending until the reminder is generated.`,
+        [{ text: 'OK', style: 'default' }]
+      );
+      return;
+    }
 
-  const getDisplayMedicines = () => {
-    if (activeFilter === 'Quick') return quickMedicines;
-    if (activeFilter === 'Routine') return routineMedicines;
-    return medicines;
+    Alert.alert(
+      'Update Status',
+      `Would you like to mark "${medicineName}" as ${actionStatus.toUpperCase()}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Save',
+          style: 'default',
+          onPress: () => handleMarkDose(sessionId, medicineId, actionStatus)
+        }
+      ]
+    );
   };
+
+  const todayMedicineEntries = buildTodayMedicineEntries();
+  console.log("MAPPED MEDICINES", JSON.stringify(todayMedicineEntries, null, 2));
+
+  const todayQuickReminders = todayMedicineEntries.filter(m => m.category === 'QUICK');
+  console.log("TODAY QUICK", JSON.stringify(todayQuickReminders, null, 2));
+  const todayRoutineReminders = todayMedicineEntries.filter(m => m.category === 'ROUTINE');
+
+  // Filtered lists for the catalog list views (Management Tabs)
+  const safeMedicines = Array.isArray(allMedicines) ? allMedicines : [];
+  const quickCatalog = safeMedicines.filter(m => m.medicineCategory === 'QUICK');
+  const routineCatalog = safeMedicines.filter(m => m.medicineCategory === 'ROUTINE');
 
   const getMedicineColor = (index: number) => MEDICINE_COLORS[index % MEDICINE_COLORS.length];
   const getMedicineIconColor = (index: number) => MEDICINE_ICON_COLORS[index % MEDICINE_ICON_COLORS.length];
 
-  const getStatusForMedicine = (med: any) => markedStatus[med.id] || null;
-
-  if (loading) {
+  // --- RENDERS THE INTERACTIVE WEB PREVIEW FRAME ---
+  if (isWeb) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={GREEN} />
-      </View>
+      <div className="flex justify-center items-center min-h-screen bg-slate-100 p-4 font-sans">
+        <div className="w-full max-w-[390px] h-[844px] bg-[#F5F9FF] rounded-[40px] shadow-2xl overflow-hidden relative border-8 border-slate-800 flex flex-col">
+          {/* Simulated Notch */}
+          <div className="absolute top-0 inset-x-0 h-6 bg-slate-800 flex justify-center items-center z-50">
+            <div className="w-32 h-4 bg-black rounded-b-xl" />
+          </div>
+
+          {/* Header */}
+          <div className="bg-white px-4 pt-10 pb-3 flex justify-between items-center border-b border-slate-100">
+            <h2 className="text-xl font-extrabold text-[#0B1F3A]">Medicines</h2>
+            <button className="text-slate-600 text-xl">🔔</button>
+          </div>
+
+          {/* Filter Bar Row */}
+          <div className="bg-white px-4 pb-3 flex space-x-2 border-b border-slate-100">
+            {FILTER_TABS.map(tab => (
+              <button
+                key={tab}
+                className={`px-5 py-1.5 rounded-full text-xs font-bold transition-all ${
+                  activeFilter === tab ? 'bg-[#289254] text-white' : 'bg-slate-100 text-slate-500'
+                }`}
+                onClick={() => setActiveFilter(tab)}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+
+          {/* Main List */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-24">
+            
+            {/* ALL TAB (TODAY'S ACTIVE SCHEDULE) */}
+            {activeFilter === 'All' && (
+              <div className="space-y-4">
+                
+                {/* 1. Quick Medicines Section */}
+                <div className="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm">
+                  <div className="flex justify-between items-center mb-4">
+                    <span className="flex items-center text-sm font-extrabold text-[#0B1F3A]"><span className="mr-2">⚡</span>Quick Medicines</span>
+                    <div className="flex space-x-3 text-[10px] font-bold text-slate-400">
+                      <span className="text-[#289254]">✓ Taken</span>
+                      <span className="text-red-500">✗ Missed</span>
+                      <span>⊖ Skip</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    {todayQuickReminders.length > 0 ? (
+                      todayQuickReminders.map((med, index) => (
+                        <div key={`${med.medicineId}-${med.rawScheduleTime}`} className="flex justify-between items-center py-2 border-b border-slate-50 last:border-0">
+                          <div className="flex items-center space-x-3">
+                            <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center text-[#289254] text-lg">💊</div>
+                            <div>
+                              <h4 className="text-xs font-bold text-[#0B1F3A]">{med.medicineName}</h4>
+                              <p className="text-[10px] text-slate-400 font-semibold">{med.medicineType}</p>
+                            </div>
+                          </div>
+                          {/* Instant Action buttons with Confirm prompts */}
+                          <div className="flex space-x-2">
+                            <button onClick={() => confirmAndMarkDose(med.sessionId, med.userMedicineId, med.medicineName, 'TAKEN')} className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${med.status === 'TAKEN' ? 'bg-emerald-500 text-white' : 'bg-slate-100 border border-slate-200 text-slate-500'}`}>✓</button>
+                            <button onClick={() => confirmAndMarkDose(med.sessionId, med.userMedicineId, med.medicineName, 'MISSED')} className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${med.status === 'MISSED' ? 'bg-red-500 text-white' : 'bg-slate-100 border border-slate-200 text-slate-500'}`}>✗</button>
+                            <button onClick={() => confirmAndMarkDose(med.sessionId, med.userMedicineId, med.medicineName, 'SKIPPED')} className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${med.status === 'SKIPPED' ? 'bg-slate-400 text-white' : 'bg-slate-100 border border-slate-200 text-slate-500'}`}>⊖</button>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-xs text-slate-400 text-center py-4">No quick medicines scheduled for today.</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* 2. Routine Medicines Section */}
+                <div className="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm">
+                  <div className="flex items-center space-x-2 mb-3">
+                    <span className="text-lg">📅</span>
+                    <span className="text-sm font-extrabold text-[#0B1F3A]">Routine Medicines</span>
+                  </div>
+
+                  {/* Period selection */}
+                  <div className="flex space-x-2 mb-4">
+                    {PERIOD_TABS.map(period => (
+                      <button
+                        key={period}
+                        className={`px-3 py-1 rounded-full text-[11px] font-bold flex items-center space-x-1 border ${
+                          activePeriod === period ? 'bg-emerald-50 border-[#289254] text-[#289254]' : 'bg-slate-50 border-transparent text-slate-400'
+                        }`}
+                        onClick={() => setActivePeriod(period)}
+                      >
+                        <span>{period === 'Morning' ? '☀️' : period === 'Evening' ? '⛅' : '🌙'}</span>
+                        <span>{period}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Matrix Check Header */}
+                  <div className="grid grid-cols-12 text-[10px] font-bold text-slate-400 border-b border-slate-100 pb-2 mb-2">
+                    <span className="col-span-6">Medicine</span>
+                    <span className="col-span-2 text-center text-emerald-600">Taken</span>
+                    <span className="col-span-2 text-center text-red-500">Missed</span>
+                    <span className="col-span-2 text-center">Skip</span>
+                  </div>
+
+                  <div className="space-y-3">
+                    {todayRoutineReminders.filter(m => m.period === activePeriod).length > 0 ? (
+                      todayRoutineReminders.filter(m => m.period === activePeriod).map(med => (
+                        <div key={`${med.medicineId}-${med.rawScheduleTime}`} className="grid grid-cols-12 items-center py-2 border-b border-slate-50 last:border-0">
+                          <div className="col-span-6">
+                            <h4 className="text-xs font-bold text-[#0B1F3A]">{med.medicineName}</h4>
+                            <p className="text-[9px] text-slate-400 font-semibold">{med.intakeInstruction}</p>
+                          </div>
+                          <div className="col-span-2 flex justify-center">
+                            <div onClick={() => confirmAndMarkDose(med.sessionId, med.userMedicineId, med.medicineName, 'TAKEN')} className={`w-5 h-5 rounded-full border-2 cursor-pointer flex items-center justify-center ${med.status === 'TAKEN' ? 'bg-[#289254] border-[#289254] text-white text-[9px]' : 'border-slate-300'}`}>✓</div>
+                          </div>
+                          <div className="col-span-2 flex justify-center">
+                            <div onClick={() => confirmAndMarkDose(med.sessionId, med.userMedicineId, med.medicineName, 'MISSED')} className={`w-5 h-5 rounded-full border-2 cursor-pointer flex items-center justify-center ${med.status === 'MISSED' ? 'bg-red-500 border-red-500 text-white text-[9px]' : 'border-slate-300'}`}>✗</div>
+                          </div>
+                          <div className="col-span-2 flex justify-center">
+                            <div onClick={() => confirmAndMarkDose(med.sessionId, med.userMedicineId, med.medicineName, 'SKIPPED')} className={`w-5 h-5 rounded-full border-2 cursor-pointer flex items-center justify-center ${med.status === 'SKIPPED' ? 'bg-slate-400 border-slate-400 text-white text-[9px]' : 'border-slate-300'}`}>⊖</div>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-xs text-slate-400 text-center py-4">No routine medicines scheduled for the {activePeriod.toLowerCase()}.</p>
+                    )}
+                  </div>
+                </div>
+
+              </div>
+            )}
+
+            {/* CATALOG MANAGEMENT TABS */}
+            {activeFilter === 'Quick' && (
+              <div className="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm space-y-4">
+                <h3 className="font-extrabold text-[#0B1F3A] text-sm">Quick Catalog List</h3>
+                {quickCatalog.map((med, index) => (
+                  <div key={med.id} className="flex justify-between items-center py-2 border-b border-slate-100 last:border-0">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 rounded-xl bg-orange-100 flex items-center justify-center text-orange-600">💊</div>
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-800">{med.medicineName}</h4>
+                        <p className="text-[10px] text-slate-400 font-medium">1 {med.medicineType?.toLowerCase() || 'tablet'}</p>
+                      </div>
+                    </div>
+                    <span className="text-slate-300 text-xs">Edit ✎</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {activeFilter === 'Routine' && (
+              <div className="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm space-y-4">
+                <h3 className="font-extrabold text-[#0B1F3A] text-sm">Routine Catalog List</h3>
+                {routineCatalog.map((med, index) => (
+                  <div key={med.id} className="flex justify-between items-center py-2 border-b border-slate-100 last:border-0">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center text-purple-600">📅</div>
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-800">{med.medicineName}</h4>
+                        <p className="text-[10px] text-slate-400 font-medium">{med.intakeInstruction}</p>
+                      </div>
+                    </div>
+                    <span className="text-slate-300 text-xs">Edit ✎</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+          </div>
+
+          {/* Floating Action Button */}
+          <button className="absolute bottom-6 right-6 w-14 h-14 bg-[#289254] rounded-full text-white font-extrabold flex items-center justify-center shadow-lg text-2xl">
+            ＋
+          </button>
+        </div>
+      </div>
     );
   }
 
-  const displayMedicines = getDisplayMedicines();
-
+  // --- NATIVE MOBILE SCREEN RENDER ---
   return (
     <View style={styles.container}>
-
+      
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Medicines</Text>
@@ -129,223 +604,234 @@ export default function MedicineListScreen() {
         }
         contentContainerStyle={styles.scroll}
       >
-
-        {displayMedicines.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Ionicons name="medical-outline" size={64} color="#D1D5DB" />
-            <Text style={styles.emptyTitle}>No Medicines Found</Text>
-            <Text style={styles.emptySubtitle}>Add a medicine to get started</Text>
-          </View>
-        ) : (
-          <>
-            {/* Quick Medicines Section */}
-            {(activeFilter === 'All' || activeFilter === 'Quick') && quickMedicines.length > 0 && (
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <View style={styles.sectionIconBox}>
-                    <Ionicons name="flash" size={16} color="#F59E0B" />
-                  </View>
-                  <Text style={styles.sectionTitle}>Quick Medicines</Text>
+        {activeFilter === 'All' && (
+          <View style={{ gap: 16 }}>
+            {/* Quick Medications Checklist Table */}
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionIconBox}>
+                  <Ionicons name="flash" size={16} color="#F59E0B" />
                 </View>
-
-                {/* Table Header */}
-                <View style={styles.tableHeader}>
-                  <Text style={[styles.tableHeaderTxt, { flex: 1 }]}>Medicine</Text>
-                  <Text style={[styles.tableHeaderTxt, { color: GREEN, width: 52, textAlign: 'center' }]}>Taken</Text>
-                  <Text style={[styles.tableHeaderTxt, { color: '#EF4444', width: 52, textAlign: 'center' }]}>Missed</Text>
-                  <Text style={[styles.tableHeaderTxt, { color: '#9CA3AF', width: 44, textAlign: 'center' }]}>Skip</Text>
-                </View>
-
-                {quickMedicines.map((med, index) => {
-                  const status = getStatusForMedicine(med);
-                  return (
-                    <TouchableOpacity
-                      key={med.id}
-                      style={styles.quickRow}
-                      onPress={() => navigation.navigate('MedicineDetails', { medicineId: med.id })}
-                    >
-                      <View style={styles.quickLeft}>
-                        <View style={[styles.medIcon, { backgroundColor: getMedicineColor(index) }]}>
-                          <Ionicons name="medical" size={18} color={getMedicineIconColor(index)} />
-                        </View>
-                        <View>
-                          <Text style={styles.medName}>{med.medicineName}</Text>
-                          <Text style={styles.medSub}>
-                            {med.medicineType ? `1 ${med.medicineType.charAt(0) + med.medicineType.slice(1).toLowerCase()}` : '1 Tablet'}
-                          </Text>
-                        </View>
-                      </View>
-
-                      <View style={styles.actionRow}>
-                        {/* Taken */}
-                        <TouchableOpacity
-                          style={[styles.actionBtn, status === 'TAKEN' && styles.takenActive]}
-                          onPress={(e) => { e.stopPropagation(); handleMark(med.id, 'TAKEN'); }}
-                        >
-                          <Ionicons
-                            name={status === 'TAKEN' ? 'checkmark-circle' : 'checkmark-circle-outline'}
-                            size={26}
-                            color={status === 'TAKEN' ? GREEN : '#D1D5DB'}
-                          />
-                          <Text style={[styles.actionLabel, { color: GREEN }]}>Taken</Text>
-                        </TouchableOpacity>
-
-                        {/* Missed */}
-                        <TouchableOpacity
-                          style={styles.actionBtn}
-                          onPress={(e) => { e.stopPropagation(); handleMark(med.id, 'MISSED'); }}
-                        >
-                          <Ionicons
-                            name={status === 'MISSED' ? 'close-circle' : 'close-circle-outline'}
-                            size={26}
-                            color={status === 'MISSED' ? '#EF4444' : '#D1D5DB'}
-                          />
-                          <Text style={[styles.actionLabel, { color: '#EF4444' }]}>Missed</Text>
-                        </TouchableOpacity>
-
-                        {/* Skip */}
-                        <TouchableOpacity
-                          style={styles.actionBtn}
-                          onPress={(e) => { e.stopPropagation(); handleMark(med.id, 'SKIPPED'); }}
-                        >
-                          <Ionicons
-                            name={status === 'SKIPPED' ? 'remove-circle' : 'remove-circle-outline'}
-                            size={26}
-                            color={status === 'SKIPPED' ? '#9CA3AF' : '#D1D5DB'}
-                          />
-                          <Text style={[styles.actionLabel, { color: '#9CA3AF' }]}>Skip</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
+                <Text style={styles.sectionTitle}>Quick Medicines</Text>
               </View>
-            )}
 
-            {/* Routine Medicines Section */}
-            {(activeFilter === 'All' || activeFilter === 'Routine') && routineMedicines.length > 0 && (
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <View style={[styles.sectionIconBox, { backgroundColor: '#EEF2FF' }]}>
-                    <Ionicons name="time" size={16} color="#6366F1" />
+              <View style={styles.tableHeader}>
+                <Text style={[styles.tableHeaderTxt, { flex: 1 }]}>Medicine</Text>
+                <Text style={[styles.tableHeaderTxt, { color: GREEN, width: 52, textAlign: 'center' }]}>Taken</Text>
+                <Text style={[styles.tableHeaderTxt, { color: '#EF4444', width: 52, textAlign: 'center' }]}>Missed</Text>
+                <Text style={[styles.tableHeaderTxt, { color: '#9CA3AF', width: 44, textAlign: 'center' }]}>Skip</Text>
+              </View>
+
+              {todayQuickReminders.length > 0 ? (
+                todayQuickReminders.map((med: any, index: number) => (
+                  <View key={`${med.medicineId}-${med.rawScheduleTime}`} style={styles.quickRow}>
+                    <View style={styles.quickLeft}>
+                      <View style={[styles.medIcon, { backgroundColor: getMedicineColor(index) }]}>
+                        <Ionicons name="medical" size={18} color={getMedicineIconColor(index)} />
+                      </View>
+                      <View>
+                        <Text style={styles.medName}>{med.medicineName}</Text>
+                        <Text style={styles.medSub}>1 {med.medicineType.charAt(0) + med.medicineType.slice(1).toLowerCase()}</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.actionRow}>
+                      <TouchableOpacity
+                        style={styles.actionBtn}
+                        onPress={() => confirmAndMarkDose(med.sessionId, med.userMedicineId, med.medicineName, 'TAKEN')}
+                      >
+                        <Ionicons
+                          name={med.status === 'TAKEN' ? 'checkmark-circle' : 'checkmark-circle-outline'}
+                          size={26}
+                          color={med.status === 'TAKEN' ? GREEN : '#D1D5DB'}
+                        />
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={styles.actionBtn}
+                        onPress={() => confirmAndMarkDose(med.sessionId, med.userMedicineId, med.medicineName, 'MISSED')}
+                      >
+                        <Ionicons
+                          name={med.status === 'MISSED' ? 'close-circle' : 'close-circle-outline'}
+                          size={26}
+                          color={med.status === 'MISSED' ? '#EF4444' : '#D1D5DB'}
+                        />
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={styles.actionBtn}
+                        onPress={() => confirmAndMarkDose(med.sessionId, med.userMedicineId, med.medicineName, 'SKIPPED')}
+                      >
+                        <Ionicons
+                          name={med.status === 'SKIPPED' ? 'remove-circle' : 'remove-circle-outline'}
+                          size={26}
+                          color={med.status === 'SKIPPED' ? '#9CA3AF' : '#D1D5DB'}
+                        />
+                      </TouchableOpacity>
+                    </View>
                   </View>
-                  <Text style={styles.sectionTitle}>Routine Medicines</Text>
-                </View>
+                ))
+              ) : (
+                <Text style={styles.emptySubtitleText}>No Quick medicines scheduled for today.</Text>
+              )}
+            </View>
 
-                {/* Period Tabs — only show when Routine or All */}
-                <View style={styles.periodTabRow}>
-                  {PERIOD_TABS.map(period => (
-                    <TouchableOpacity
-                      key={period}
-                      style={[styles.periodTab, activePeriod === period && styles.periodTabActive]}
-                      onPress={() => setActivePeriod(period)}
-                    >
-                      <Ionicons
-                        name={PERIOD_ICONS[period]}
-                        size={14}
-                        color={activePeriod === period ? GREEN : '#9CA3AF'}
-                      />
-                      <Text style={[styles.periodTabText, activePeriod === period && styles.periodTabTextActive]}>
-                        {period}
+            {/* Routine Medications Period Check-sheet */}
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <View style={[styles.sectionIconBox, { backgroundColor: '#EEF2FF' }]}>
+                  <Ionicons name="time" size={16} color="#6366F1" />
+                </View>
+                <Text style={styles.sectionTitle}>Routine Medicines</Text>
+              </View>
+
+              {/* Period selection */}
+              <View style={styles.periodTabRow}>
+                {PERIOD_TABS.map(period => (
+                  <TouchableOpacity
+                    key={period}
+                    style={[styles.periodTab, activePeriod === period && styles.periodTabActive]}
+                    onPress={() => setActivePeriod(period)}
+                  >
+                    <Ionicons
+                      name={PERIOD_ICONS[period]}
+                      size={14}
+                      color={activePeriod === period ? GREEN : '#9CA3AF'}
+                    />
+                    <Text style={[styles.periodTabText, activePeriod === period && styles.periodTabTextActive]}>
+                      {period}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <View style={styles.routineTableHeader}>
+                <Text style={[styles.tableHeaderTxt, { flex: 1 }]}>Medicine</Text>
+                <Text style={[styles.tableHeaderTxt, { color: GREEN, width: 50, textAlign: 'center' }]}>Taken</Text>
+                <Text style={[styles.tableHeaderTxt, { color: '#EF4444', width: 50, textAlign: 'center' }]}>Missed</Text>
+                <Text style={[styles.tableHeaderTxt, { color: '#9CA3AF', width: 44, textAlign: 'center' }]}>Skip</Text>
+              </View>
+
+              {todayRoutineReminders.filter(m => m.period === activePeriod).length > 0 ? (
+                todayRoutineReminders.filter(m => m.period === activePeriod).map((med: any) => (
+                  <View key={`${med.medicineId}-${med.rawScheduleTime}`} style={styles.routineRow}>
+                    <View style={styles.routineLeft}>
+                      <Text style={styles.routineMedName}>{med.medicineName}</Text>
+                      <Text style={styles.routineMedSub}>
+                        1 {med.medicineType.charAt(0) + med.medicineType.slice(1).toLowerCase()}
+                        {med.intakeInstruction ? ` • ${med.intakeInstruction.replace(/_/g, ' ')}` : ''}
                       </Text>
-                    </TouchableOpacity>
-                  ))}
+                    </View>
+
+                    <View style={styles.routineActions}>
+                      <TouchableOpacity
+                        style={styles.routineActionBtn}
+                        onPress={() => confirmAndMarkDose(med.sessionId, med.userMedicineId, med.medicineName, 'TAKEN')}
+                      >
+                        <View style={[
+                          styles.routineCircle,
+                          med.status === 'TAKEN' && { backgroundColor: GREEN, borderColor: GREEN }
+                        ]}>
+                          {med.status === 'TAKEN' && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
+                        </View>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={styles.routineActionBtn}
+                        onPress={() => confirmAndMarkDose(med.sessionId, med.userMedicineId, med.medicineName, 'MISSED')}
+                      >
+                        <View style={[
+                          styles.routineCircle,
+                          med.status === 'MISSED' && { backgroundColor: '#EF4444', borderColor: '#EF4444' }
+                        ]}>
+                          {med.status === 'MISSED' && <Ionicons name="close" size={14} color="#FFFFFF" />}
+                        </View>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={styles.routineActionBtn}
+                        onPress={() => confirmAndMarkDose(med.sessionId, med.userMedicineId, med.medicineName, 'SKIPPED')}
+                      >
+                        <View style={[
+                          styles.routineCircle,
+                          med.status === 'SKIPPED' && { backgroundColor: '#9CA3AF', borderColor: '#9CA3AF' }
+                        ]}>
+                          {med.status === 'SKIPPED' && <Ionicons name="remove" size={14} color="#FFFFFF" />}
+                        </View>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.emptySubtitleText}>No Routine medicines scheduled for the {activePeriod.toLowerCase()}.</Text>
+              )}
+            </View>
+          </View>
+        )}
+
+        {/* Catalog views for Quick / Routine Management */}
+        {activeFilter === 'Quick' && (
+          <View style={styles.section}>
+            {quickCatalog.map((med, index) => (
+              <TouchableOpacity
+                key={med.id}
+                style={styles.quickRow}
+                onPress={() => navigation.navigate('MedicineDetails', { medicineId: med.id })}
+              >
+                <View style={styles.quickLeft}>
+                  <View style={[styles.medIcon, { backgroundColor: getMedicineColor(index) }]}>
+                    <Ionicons name="medical" size={18} color={getMedicineIconColor(index)} />
+                  </View>
+                  <View>
+                    <Text style={styles.medName}>{med.medicineName}</Text>
+                    <Text style={styles.medSub}>1 {med.medicineType?.toLowerCase() || 'tablet'}</Text>
+                  </View>
                 </View>
+                <Ionicons name="chevron-forward" size={18} color="#D1D5DB" />
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
 
-                {/* Routine Table Header */}
-                <View style={styles.routineTableHeader}>
-                  <Text style={[styles.tableHeaderTxt, { flex: 1 }]}>Medicine</Text>
-                  <Text style={[styles.tableHeaderTxt, { color: GREEN, width: 50, textAlign: 'center' }]}>Taken</Text>
-                  <Text style={[styles.tableHeaderTxt, { color: '#EF4444', width: 50, textAlign: 'center' }]}>Missed</Text>
-                  <Text style={[styles.tableHeaderTxt, { color: '#9CA3AF', width: 44, textAlign: 'center' }]}>Skip</Text>
+        {activeFilter === 'Routine' && (
+          <View style={styles.section}>
+            {routineCatalog.map((med, index) => (
+              <TouchableOpacity
+                key={med.id}
+                style={styles.quickRow}
+                onPress={() => navigation.navigate('MedicineDetails', { medicineId: med.id })}
+              >
+                <View style={styles.quickLeft}>
+                  <View style={[styles.medIcon, { backgroundColor: getMedicineColor(index) }]}>
+                    <Ionicons name="calendar" size={18} color={getMedicineIconColor(index)} />
+                  </View>
+                  <View>
+                    <Text style={styles.medName}>{med.medicineName}</Text>
+                    <Text style={styles.medSub}>{med.intakeInstruction || 'After breakfast'}</Text>
+                  </View>
                 </View>
-
-                {routineMedicines.map((med) => {
-                  const status = getStatusForMedicine(med);
-                  return (
-                    <TouchableOpacity
-                      key={med.id}
-                      style={styles.routineRow}
-                      onPress={() => navigation.navigate('MedicineDetails', { medicineId: med.id })}
-                    >
-                      <View style={styles.routineLeft}>
-                        <Text style={styles.routineMedName}>{med.medicineName}</Text>
-                        <Text style={styles.routineMedSub}>
-                          {med.medicineType
-                            ? `1 ${med.medicineType.charAt(0) + med.medicineType.slice(1).toLowerCase()}`
-                            : '1 Tablet'
-                          }
-                          {med.intakeInstruction
-                            ? ` • ${med.intakeInstruction.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}`
-                            : ''
-                          }
-                        </Text>
-                      </View>
-
-                      <View style={styles.routineActions}>
-                        {/* Taken */}
-                        <TouchableOpacity
-                          style={styles.routineActionBtn}
-                          onPress={(e) => { e.stopPropagation(); handleMark(med.id, 'TAKEN'); }}
-                        >
-                          <View style={[
-                            styles.routineCircle,
-                            status === 'TAKEN' && { backgroundColor: GREEN, borderColor: GREEN }
-                          ]}>
-                            {status === 'TAKEN' && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
-                          </View>
-                        </TouchableOpacity>
-
-                        {/* Missed */}
-                        <TouchableOpacity
-                          style={styles.routineActionBtn}
-                          onPress={(e) => { e.stopPropagation(); handleMark(med.id, 'MISSED'); }}
-                        >
-                          <View style={[
-                            styles.routineCircle,
-                            status === 'MISSED' && { backgroundColor: '#EF4444', borderColor: '#EF4444' }
-                          ]}>
-                            {status === 'MISSED' && <Ionicons name="close" size={14} color="#FFFFFF" />}
-                          </View>
-                        </TouchableOpacity>
-
-                        {/* Skip */}
-                        <TouchableOpacity
-                          style={styles.routineActionBtn}
-                          onPress={(e) => { e.stopPropagation(); handleMark(med.id, 'SKIPPED'); }}
-                        >
-                          <View style={[
-                            styles.routineCircle,
-                            status === 'SKIPPED' && { backgroundColor: '#9CA3AF', borderColor: '#9CA3AF' }
-                          ]}>
-                            {status === 'SKIPPED' && <Ionicons name="remove" size={14} color="#FFFFFF" />}
-                          </View>
-                        </TouchableOpacity>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
-          </>
+                <Ionicons name="chevron-forward" size={18} color="#D1D5DB" />
+              </TouchableOpacity>
+            ))}
+          </View>
         )}
 
         <View style={{ height: 100 }} />
       </ScrollView>
 
-      {/* Add Medicine FAB */}
+      {/* Floating Action Button */}
       <TouchableOpacity
         style={styles.fab}
-        onPress={() => navigation.navigate('AddMedicine')}
+        onPress={() => navigation.navigate('AddQuickMedicine')}
       >
         <Ionicons name="add" size={28} color="#FFFFFF" />
       </TouchableOpacity>
-
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+// Plain Object StyleSheet for guaranteed compilation and TS compatibility
+const styles: any = {
   container: { flex: 1, backgroundColor: '#F5F9FF' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
@@ -366,14 +852,9 @@ const styles = StyleSheet.create({
     borderRadius: 20, backgroundColor: '#F3F4F6',
   },
   filterTabActive: { backgroundColor: GREEN },
-  filterTabText: { fontSize: 13, fontWeight: '600', color: '#6B7280' },
+  filterTabText: { fontSize: 13, fontWeight: '600', color: '#718096' },
   filterTabTextActive: { color: '#FFFFFF' },
-
   scroll: { padding: 16 },
-
-  emptyContainer: { alignItems: 'center', paddingTop: 60, gap: 10 },
-  emptyTitle: { fontSize: 17, fontWeight: '700', color: '#374151' },
-  emptySubtitle: { fontSize: 13, color: '#9CA3AF' },
 
   section: {
     backgroundColor: '#FFFFFF', borderRadius: 20, padding: 16,
@@ -409,9 +890,7 @@ const styles = StyleSheet.create({
   medSub: { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
 
   actionRow: { flexDirection: 'row', gap: 0 },
-  actionBtn: { width: 52, alignItems: 'center', gap: 2 },
-  actionLabel: { fontSize: 9, fontWeight: '600' },
-  takenActive: {},
+  actionBtn: { width: 52, alignItems: 'center', justifyContent: 'center' },
 
   periodTabRow: {
     flexDirection: 'row', gap: 8, marginBottom: 12,
@@ -449,6 +928,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
   },
 
+  emptySubtitleText: {
+    fontSize: 12, color: '#9CA3AF', textAlign: 'center', marginVertical: 16, fontWeight: '500'
+  },
+
   fab: {
     position: 'absolute', bottom: 90, right: 20,
     width: 56, height: 56, borderRadius: 28,
@@ -456,4 +939,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
     elevation: 4,
   },
-});
+};

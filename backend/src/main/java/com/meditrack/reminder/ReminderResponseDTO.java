@@ -1,43 +1,26 @@
 package com.meditrack.reminder;
 
-import com.meditrack.enums.ReminderStatus;
 import lombok.*;
-
-import java.time.LocalDateTime;
 import java.util.List;
 
-@Getter
-@Setter
+@Data
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
 public class ReminderResponseDTO {
-
     private String sessionId;
+    private String sessionTime;
+    private String status;
+    private int medicineCount;
+    private List<MedicineItem> medicines;
 
-    private LocalDateTime sessionTime;
-
-    private Integer medicineCount;
-
-    private ReminderStatus status;
-
-    private LocalDateTime completedAt;
-
-    private List<ReminderMedicineDTO> medicines;
-
-    @Getter
-    @Setter
+    @Data
+    @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    @Builder
-    public static class ReminderMedicineDTO {
-
+    public static class MedicineItem {
         private String userMedicineId;
-
         private String medicineName;
-
-        private String dosage;
-
         private String status;
     }
 }

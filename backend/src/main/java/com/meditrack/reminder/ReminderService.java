@@ -1,20 +1,21 @@
 package com.meditrack.reminder;
 
+import java.time.LocalDate;
 import java.util.List;
 
 public interface ReminderService {
 
-    List<ReminderResponseDTO> getTodayReminders();
+    List<ReminderResponseDTO> getTodayReminders(String userId);
 
-    List<ReminderResponseDTO> getReminderHistory();
+    List<ReminderResponseDTO> getReminderHistory(String userId);
 
     ReminderResponseDTO getReminderSession(String sessionId);
 
     void markAllTaken(String sessionId);
 
-    void markAllSkipped(String sessionId, String skipReason);
+    void markAllSkipped(String sessionId);
 
-    void snoozeReminder(String sessionId, Integer minutes);
+    void snoozeSession(String sessionId, int minutes);
 
     UpdateMedicineStatusResponseDTO markMedicineTaken(
             String sessionId,
@@ -38,4 +39,6 @@ public interface ReminderService {
             String medicineId,
             UpdateMedicineStatusRequestDTO request
     );
+
+    void updateDailyAdherence(String userId, LocalDate date);
 }

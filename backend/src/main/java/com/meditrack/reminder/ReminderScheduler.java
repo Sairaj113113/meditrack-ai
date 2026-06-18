@@ -1,69 +1,173 @@
 package com.meditrack.reminder;
 
+import com.meditrack.enums.*;
+import com.meditrack.medicine.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
-@Component
-@RequiredArgsConstructor
+import java.time.*;
+import java.util.List;
+
 @Slf4j
+@Component
+@EnableScheduling
+@RequiredArgsConstructor
 public class ReminderScheduler {
 
+    private final MedicineRepository medicineRepository;
+    private final MedicineScheduleRepository scheduleRepository;
+    private final ReminderSessionRepository sessionRepository;
+    private final ReminderSessionMedicineRepository sessionMedicineRepository;
     private final ReminderService reminderService;
-    private final RetryReminderService retryReminderService;
 
-    /**
-     * Runs every minute
-     */
-    @Scheduled(fixedRate = 60000)
-    public void processReminders() {
+    @Scheduled(fixedRate = 60000) // every minute
+@Scheduled(fixedRate = 60000)
+@Transactional
+public void createReminderSessions() {
 
-        log.info("Reminder Scheduler Running...");
+    LocalDateTime now = LocalDateTime.now();
+    LocalTime currentTime = now.toLocalTime().withSecond(0).withNano(0);
+    LocalDate today = LocalDate.now();
 
-        try {
+    List<MedicineSchedule> schedules = scheduleRepository.findAll();
 
-            createReminderSessions();
+    log.info("Schedules Found = {}", schedules.size());
 
-            processSnoozedReminders();
+    for (MedicineSchedule schedule : schedules) {
 
-            retryReminderService.processRetries();
+        log.info(
+                "ScheduleId={} UserMedicineId={} ScheduleTime={} CurrentTime={}",
+                schedule.getId(),
+                schedule.getUserMedicineId(),
+                schedule.getScheduleTime(),
+                currentTime
+        );
 
-            triggerNotifications();
+        if (!schedule.getIsActive()) {
+            log.info("Skipped: Inactive Schedule");
+            continue;
+        }
 
-        } catch (Exception e) {
+        LocalTime scheduleTime = schedule.getScheduleTime();
 
-            log.error("Error while processing reminders", e);
+        Medicine medicine = medicineRepository
+                .findById(schedule.getUserMedicineId())
+                .orElse(null);
 
+        if (medicine == null) {
+            log.info("Skipped: Medicine Not Found");
+            continue;
+        }
+
+        if (medicine.getStatus() != MedicineStatus.ACTIVE) {
+            log.info("Skipped: Medicine Not Active");
+            continue;
+        }
+
+        if (medicine.getIsDeleted()) {
+            log.info("Skipped: Medicine Deleted");
+            continue;
+        }
+
+        // DEV FIX
+        // Create reminder if scheduled time has already arrived
+        if (scheduleTime.isAfter(currentTime)) {
+            log.info("Skipped: Future Schedule");
+            continue;
+        }
+
+        String userId = medicine.getUserId();
+
+        LocalDateTime sessionStart = today.atTime(scheduleTime);
+        LocalDateTime sessionEnd = sessionStart.plusMinutes(1);
+
+        List<ReminderSession> existing =
+                sessionRepository.findByUserIdAndScheduledTimeBetween(
+                        userId,
+                        sessionStart,
+                        sessionEnd
+                );
+
+        ReminderSession session;
+        if (!existing.isEmpty()) {
+            session = existing.get(0);
+            log.info("Reusing existing session {} for schedule {}", session.getId(), scheduleTime);
+        } else {
+            session = ReminderSession.builder()
+                    .userId(userId)
+                    .scheduledTime(sessionStart)
+                    .status(ReminderStatus.PENDING)
+                    .build();
+
+            try {
+                session = sessionRepository.save(session);
+                log.info("SESSION SAVED {}", session.getId());
+            } catch (Exception e) {
+                log.error("SAVE FAILED", e);
+                continue;
+            }
+        }
+
+        boolean alreadyAttached = sessionMedicineRepository
+                .findByReminderSessionIdAndUserMedicineId(session.getId(), medicine.getId())
+                .isPresent();
+
+        if (alreadyAttached) {
+            log.info(
+                    "Skipped: Medicine {} already attached to session {}",
+                    medicine.getId(),
+                    session.getId()
+            );
+            continue;
+        }
+
+        ReminderSessionMedicine sessionMedicine =
+                ReminderSessionMedicine.builder()
+                        .reminderSessionId(session.getId())
+                        .userMedicineId(medicine.getId())
+                        .status(ReminderMedicineStatus.PENDING)
+                        .build();
+
+        sessionMedicineRepository.save(sessionMedicine);
+
+        log.info(
+                "Appended medicine {} to reminder session {}",
+                medicine.getMedicineName(),
+                session.getId()
+        );
+    }
+}
+
+    @Scheduled(fixedRate = 300000) // every 5 minutes
+    public void processMissedReminders() {
+        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(30);
+
+        List<ReminderSession> pendingSessions = sessionRepository
+                .findByStatusAndScheduledTimeBefore(
+    ReminderStatus.PENDING,
+    cutoff
+);
+
+        for (ReminderSession session : pendingSessions) {
+            List<ReminderSessionMedicine> medicines = sessionMedicineRepository
+                    .findByReminderSessionId(session.getId());
+
+            medicines.stream()
+                    .filter(m -> m.getStatus() == ReminderMedicineStatus.PENDING)
+                    .forEach(m -> {
+                        m.setStatus(ReminderMedicineStatus.MISSED);
+                        sessionMedicineRepository.save(m);
+                    });
+
+            session.setStatus(ReminderStatus.MISSED);
+            sessionRepository.save(session);
+
+            reminderService.updateDailyAdherence(session.getUserId(), LocalDate.now());
         }
     }
-
-    private void createReminderSessions() {
-
-        log.info("Creating reminder sessions...");
-
-        // TODO:
-        // Read medicine_schedules
-        // Create reminder_sessions
-        // Create reminder_session_medicines
-    }
-
-    private void processSnoozedReminders() {
-
-        log.info("Processing snoozed reminders...");
-
-        // TODO:
-        // Find sessions with status = SNOOZED
-        // If snoozed_until <= now
-        // Trigger notification again
-    }
-
-    private void triggerNotifications() {
-
-        log.info("Triggering notifications...");
-
-        // TODO:
-        // Create notification_queue entries
-        // Send FCM notification
-    }
+    
 }

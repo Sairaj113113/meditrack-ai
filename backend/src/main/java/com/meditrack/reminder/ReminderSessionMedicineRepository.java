@@ -1,28 +1,13 @@
 package com.meditrack.reminder;
 
-import com.meditrack.enums.ReminderMedicineStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Repository;
-
 import java.util.List;
+import java.util.Optional;
 
-@Repository
-public interface ReminderSessionMedicineRepository
-        extends JpaRepository<ReminderSessionMedicine, String> {
+public interface ReminderSessionMedicineRepository extends JpaRepository<ReminderSessionMedicine, String> {
 
-    List<ReminderSessionMedicine> findByReminderSession_Id(String reminderSessionId);
+    List<ReminderSessionMedicine> findByReminderSessionId(String sessionId);
 
-    List<ReminderSessionMedicine> findByUserMedicine_Id(String userMedicineId);
-
-    List<ReminderSessionMedicine> findByReminderSession_IdAndStatus(
-            String reminderSessionId,
-            ReminderMedicineStatus status
-    );
-
-    long countByReminderSession_Id(String reminderSessionId);
-
-    long countByReminderSession_IdAndStatus(
-            String reminderSessionId,
-            ReminderMedicineStatus status
-    );
+    Optional<ReminderSessionMedicine> findByReminderSessionIdAndUserMedicineId(
+            String sessionId, String userMedicineId);
 }

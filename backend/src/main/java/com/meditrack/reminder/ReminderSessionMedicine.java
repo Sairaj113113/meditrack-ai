@@ -21,12 +21,18 @@ public class ReminderSessionMedicine extends BaseEntity {
     private String id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "reminder_session_id", nullable = false)
+    @JoinColumn(name = "reminder_session_id", insertable = false, updatable = false)
     private ReminderSession reminderSession;
 
+    @Column(name = "reminder_session_id", nullable = false, length = 36)
+    private String reminderSessionId;
+
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_medicine_id", nullable = false)
+    @JoinColumn(name = "user_medicine_id", insertable = false, updatable = false)
     private UserMedicine userMedicine;
+
+    @Column(name = "user_medicine_id", nullable = false, length = 36)
+    private String userMedicineId;
 
     @Builder.Default
     @Enumerated(EnumType.STRING)

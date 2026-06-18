@@ -9,6 +9,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.stream.Collectors;
+import com.meditrack.disease.DiseaseDTO;
+import com.meditrack.disease.DiseaseService;
 
 @Service
 @RequiredArgsConstructor
@@ -17,38 +19,52 @@ public class MedicineService {
     private final MedicineRepository medicineRepository;
     private final MedicineScheduleRepository scheduleRepository;
     private final MedicineMapper medicineMapper;
+    private final DiseaseService diseaseService;
+@Transactional
+public MedicineResponseDTO addMedicine(String userId, AddMedicineDTO dto) {
 
-    @Transactional
-    public MedicineResponseDTO addMedicine(String userId, AddMedicineDTO dto) {
-        Medicine medicine = Medicine.builder()
-                .userId(userId)
-                .userDiseaseId(dto.getUserDiseaseId())
-                .medicineName(dto.getMedicineName())
-                .medicineCategory(dto.getMedicineCategory())
-                .medicineType(dto.getMedicineType())
-                .frequencyType(dto.getFrequencyType())
-                .intakeInstruction(dto.getIntakeInstruction())
-                .startDate(dto.getStartDate())
-                .endDate(dto.getEndDate())
-                .notes(dto.getNotes())
-                .build();
+    String diseaseId = dto.getUserDiseaseId();
 
-        medicineRepository.save(medicine);
+    if (dto.getDiseaseName() != null &&
+            !dto.getDiseaseName().trim().isEmpty()) {
 
-        List<MedicineSchedule> schedules = dto.getSchedules().stream()
-                .map(s -> MedicineSchedule.builder()
-                        .userMedicineId(medicine.getId())
-                        .scheduleTime(s.getScheduleTime())
-                        .scheduleType(s.getScheduleType())
-                        .dayOfWeek(s.getDayOfWeek())
-                        .intervalHours(s.getIntervalHours())
-                        .build())
-                .collect(Collectors.toList());
+        DiseaseDTO disease = diseaseService.createQuickDisease(
+                userId,
+                dto.getDiseaseName().trim()
+        );
 
-        scheduleRepository.saveAll(schedules);
-
-        return medicineMapper.toResponse(medicine, schedules);
+        diseaseId = disease.getId();
     }
+
+    Medicine medicine = Medicine.builder()
+            .userId(userId)
+            .userDiseaseId(diseaseId)
+            .medicineName(dto.getMedicineName())
+            .medicineCategory(dto.getMedicineCategory())
+            .medicineType(dto.getMedicineType())
+            .frequencyType(dto.getFrequencyType())
+            .intakeInstruction(dto.getIntakeInstruction())
+            .startDate(dto.getStartDate())
+            .endDate(dto.getEndDate())
+            .notes(dto.getNotes())
+            .build();
+
+    medicineRepository.save(medicine);
+
+    List<MedicineSchedule> schedules = dto.getSchedules().stream()
+            .map(s -> MedicineSchedule.builder()
+                    .userMedicineId(medicine.getId())
+                    .scheduleTime(s.getScheduleTime())
+                    .scheduleType(s.getScheduleType())
+                    .dayOfWeek(s.getDayOfWeek())
+                    .intervalHours(s.getIntervalHours())
+                    .build())
+            .collect(Collectors.toList());
+
+    scheduleRepository.saveAll(schedules);
+
+    return medicineMapper.toResponse(medicine, schedules);
+}
 
     public List<MedicineResponseDTO> getMedicines(String userId,
                                                    MedicineCategory category,

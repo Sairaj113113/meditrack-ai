@@ -15,6 +15,10 @@ import ProfileScreen from "../screens/profile/ProfileScreen";
 import MedicalProfileScreen from "../screens/profile/MedicalProfileScreen";
 
 import CaregiversScreen from "../screens/caregiver/CaregiverScreen";
+import AddQuickMedicineScreen from "../screens/medicine/AddQuickMedicineScreen";
+import CreateMedicineRoutineScreen from "../screens/routine/CreateMedicineRoutineScreen";
+import MedicineAddedSuccessScreen from "../screens/medicine/MedicineAddedSuccessScreen";
+
 
 const Stack = createNativeStackNavigator();
 
@@ -75,6 +79,23 @@ export default function AppNavigator() {
         name="Caregivers"
         component={CaregiversScreen}
       />
+{/* Medicines */}
+
+<Stack.Screen
+  name="AddQuickMedicine"
+  component={AddQuickMedicineScreen}
+/>
+
+<Stack.Screen
+  name="CreateMedicineRoutine"
+  component={CreateMedicineRoutineScreen}
+/>
+
+<Stack.Screen
+  name="MedicineAddedSuccessScreen"
+  component={MedicineAddedSuccessScreen}
+/>
+   
     </Stack.Navigator>
   );
 }

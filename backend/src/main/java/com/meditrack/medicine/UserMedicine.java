@@ -1,4 +1,3 @@
-// placeholder 
 package com.meditrack.medicine;
 
 import com.meditrack.common.BaseEntity;
@@ -31,25 +30,21 @@ public class UserMedicine extends BaseEntity {
     @Column(length = 36)
     private String userDiseaseId;
 
-    @Column(nullable = false, length = 36)
+    // OLD FIELD - keep nullable for compatibility
     private String medicineId;
 
-    @Column(nullable = false)
+    // OLD FIELD - keep nullable for compatibility
     private String dosage;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
     private MedicineCategory medicineCategory;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
     private IntakeInstruction intakeInstruction;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
     private FrequencyType frequencyType;
 
-    @Column(nullable = false)
     private LocalDate startDate;
 
     private LocalDate endDate;
@@ -61,12 +56,10 @@ public class UserMedicine extends BaseEntity {
 
     @Builder.Default
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
     private MedicineStatus status = MedicineStatus.ACTIVE;
 
-    @Builder.Default
-    @Column(nullable = false)
-    private Boolean isPaused = false;
+    // OLD FIELD - keep nullable for compatibility
+    private Boolean isPaused;
 
     private LocalDate pausedAt;
 }
