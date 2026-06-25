@@ -1,10 +1,7 @@
 package com.meditrack.medicine;
 
 import com.meditrack.common.BaseEntity;
-import com.meditrack.enums.FrequencyType;
-import com.meditrack.enums.IntakeInstruction;
-import com.meditrack.enums.MedicineCategory;
-import com.meditrack.enums.MedicineStatus;
+import com.meditrack.enums.*;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -30,13 +27,24 @@ public class UserMedicine extends BaseEntity {
     @Column(length = 36)
     private String userDiseaseId;
 
-    // OLD FIELD - keep nullable for compatibility
+    @Column(length = 36)
+    private String routineGroupId;
+
+    // Legacy reference
+    @Column(length = 36)
     private String medicineId;
 
-    // OLD FIELD - keep nullable for compatibility
+    @Column(nullable = false)
+    private String medicineName;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private MedicineType medicineType;
+
     private String dosage;
 
     @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
     private MedicineCategory medicineCategory;
 
     @Enumerated(EnumType.STRING)
@@ -58,8 +66,8 @@ public class UserMedicine extends BaseEntity {
     @Enumerated(EnumType.STRING)
     private MedicineStatus status = MedicineStatus.ACTIVE;
 
-    // OLD FIELD - keep nullable for compatibility
-    private Boolean isPaused;
+    @Builder.Default
+    private Boolean isPaused = false;
 
     private LocalDate pausedAt;
 }

@@ -14,6 +14,7 @@ public class DashboardDTO {
     private Integer takenCount;
     private Integer missedCount;
     private Integer pendingCount;
+    private Integer skippedCount;
     private Integer totalMedicines;
     private Integer currentStreak;
     private Integer bestStreak;

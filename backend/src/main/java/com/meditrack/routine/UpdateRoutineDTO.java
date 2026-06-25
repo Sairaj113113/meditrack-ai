@@ -1,16 +1,33 @@
 package com.meditrack.routine;
 
-import lombok.Data;
+import com.meditrack.enums.DayOfWeekType;
+import com.meditrack.enums.FrequencyType;
+import lombok.*;
+
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.List;
 
-@Data
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class UpdateRoutineDTO {
 
     private String routineName;
+
+    private String userDiseaseId;
+
     private LocalTime routineTime;
-    private Integer repeatCount;
+
+    private FrequencyType frequencyType;
+
     private LocalDate startDate;
+
     private LocalDate endDate;
-    private String reminderTone;
+
+    private Boolean isReminderEnabled;
+
+    private List<DayOfWeekType> days;
 }

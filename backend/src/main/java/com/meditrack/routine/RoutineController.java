@@ -1,15 +1,12 @@
 package com.meditrack.routine;
 
 import com.meditrack.common.ApiResponse;
-import com.meditrack.user.User;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
+import com.meditrack.user.User;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 
 @RestController
 @RequestMapping("/api/routines")
@@ -18,66 +15,201 @@ public class RoutineController {
 
     private final RoutineService routineService;
 
-    @PostMapping
-    public ResponseEntity<ApiResponse<RoutineResponseDTO>> createRoutine(
-            @AuthenticationPrincipal User user,
-            @Valid @RequestBody CreateRoutineDTO dto) {
-        RoutineResponseDTO response = routineService.createRoutine(user.getId(), dto);
-        return ResponseEntity.ok(ApiResponse.<RoutineResponseDTO>builder()
-                .success(true).message(response.getMessage()).data(response).build());
+   @PostMapping
+public ApiResponse<RoutineResponseDTO> createRoutine(
+        @AuthenticationPrincipal User user,
+        @RequestBody CreateRoutineDTO request
+){
+
+        return ApiResponse.success(
+               routineService.createRoutine(
+        request,
+        user.getId()
+)
+        );
     }
 
-    @GetMapping
-    public ResponseEntity<ApiResponse<List<RoutineResponseDTO>>> getRoutines(
-            @AuthenticationPrincipal User user) {
-        List<RoutineResponseDTO> response = routineService.getRoutines(user.getId());
-        return ResponseEntity.ok(ApiResponse.<List<RoutineResponseDTO>>builder()
-                .success(true).message("Success").data(response).build());
-    }
+   @GetMapping
+public ApiResponse<List<RoutineResponseDTO>> getAllRoutines(
+        @AuthenticationPrincipal User user
+) {
+
+    return ApiResponse.success(
+            routineService.getAllRoutines(
+                    user.getId()
+            )
+    );
+}
+
+@GetMapping("/diseases")
+public ApiResponse<List<DiseaseRoutineDTO>> getRoutineDiseases(
+        @AuthenticationPrincipal User user
+) {
+
+    return ApiResponse.success(
+            routineService.getRoutineDiseases(
+                    user.getId()
+            )
+    );
+}
+
+@GetMapping("/disease/{diseaseId}")
+public ApiResponse<List<RoutineByDiseaseDTO>>
+getRoutinesByDisease(
+        @PathVariable String diseaseId
+) {
+
+    return ApiResponse.success(
+            routineService.getRoutinesByDisease(
+                    diseaseId
+            )
+    );
+}
 
     @GetMapping("/{id}")
-    public ResponseEntity<ApiResponse<RoutineDetailsDTO>> getRoutineDetails(
-            @AuthenticationPrincipal User user,
-            @PathVariable String id) {
-        RoutineDetailsDTO response = routineService.getRoutineDetails(user.getId(), id);
-        return ResponseEntity.ok(ApiResponse.<RoutineDetailsDTO>builder()
-                .success(true).message("Success").data(response).build());
+    public ApiResponse<RoutineDetailsDTO> getRoutineById(
+            @PathVariable String id
+    ) {
+
+        return ApiResponse.success(
+                routineService.getRoutineById(id)
+        );
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<ApiResponse<?>> updateRoutine(
-            @AuthenticationPrincipal User user,
+    public ApiResponse<RoutineResponseDTO> updateRoutine(
             @PathVariable String id,
-            @RequestBody UpdateRoutineDTO dto) {
-        routineService.updateRoutine(user.getId(), id, dto);
-        return ResponseEntity.ok(ApiResponse.builder()
-                .success(true).message("Routine updated").build());
+            @RequestBody UpdateRoutineDTO request
+    ) {
+
+        return ApiResponse.success(
+                routineService.updateRoutine(
+                        id,
+                        request
+                )
+        );
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<ApiResponse<?>> deleteRoutine(
-            @AuthenticationPrincipal User user,
-            @PathVariable String id) {
-        routineService.deleteRoutine(user.getId(), id);
-        return ResponseEntity.ok(ApiResponse.builder()
-                .success(true).message("Routine deleted").build());
+    public ApiResponse<String> deleteRoutine(
+            @PathVariable String id
+    ) {
+
+        routineService.deleteRoutine(id);
+
+        return ApiResponse.success(
+                "Routine deleted successfully"
+        );
     }
 
     @PostMapping("/{id}/medicines")
-    public ResponseEntity<ApiResponse<?>> addMedicineToRoutine(
-            @PathVariable String id,
-            @RequestBody Map<String, String> body) {
-        routineService.addMedicineToRoutine(id, body);
-        return ResponseEntity.ok(ApiResponse.builder()
-                .success(true).message("Medicine added to routine").build());
-    }
+public ApiResponse<RoutineMedicineDTO> addMedicine(
+        @PathVariable String id,
+        @RequestBody AddRoutineMedicineDTO request
+) {
 
-    @DeleteMapping("/{routineId}/medicines/{medicineId}")
-    public ResponseEntity<ApiResponse<?>> removeMedicineFromRoutine(
-            @PathVariable String routineId,
-            @PathVariable String medicineId) {
-        routineService.removeMedicineFromRoutine(routineId, medicineId);
-        return ResponseEntity.ok(ApiResponse.builder()
-                .success(true).message("Medicine removed from routine").build());
-    }
+    return ApiResponse.success(
+            routineService.addMedicine(
+                    id,
+                    request
+            )
+    );
+}
+
+@GetMapping("/{id}/medicines")
+public ApiResponse<List<RoutineMedicineDTO>> getRoutineMedicines(
+        @PathVariable String id
+) {
+
+    return ApiResponse.success(
+            routineService.getRoutineMedicines(id)
+    );
+}
+
+@DeleteMapping("/{routineId}/medicines/{medicineId}")
+public ApiResponse<String> removeMedicine(
+        @PathVariable String routineId,
+        @PathVariable String medicineId
+) {
+
+    routineService.removeMedicine(
+            routineId,
+            medicineId
+    );
+
+    return ApiResponse.success(
+            "Medicine removed successfully"
+    );
+}
+
+@PutMapping("/medicines/{medicineId}")
+public ApiResponse<RoutineMedicineDTO>
+updateMedicine(
+        @PathVariable String medicineId,
+        @RequestBody UpdateRoutineMedicineDTO request
+) {
+
+    return ApiResponse.success(
+            routineService.updateMedicine(
+                    medicineId,
+                    request
+            )
+    );
+}
+@PostMapping("/{id}/archive")
+public ApiResponse<String> archiveRoutine(
+        @PathVariable String id
+) {
+
+    routineService.archiveRoutine(id);
+
+    return ApiResponse.success(
+            "Routine archived successfully"
+    );
+}
+@PostMapping("/{id}/unarchive")
+public ApiResponse<String> unarchiveRoutine(
+        @PathVariable String id
+) {
+
+    routineService.unarchiveRoutine(id);
+
+    return ApiResponse.success(
+            "Routine unarchived successfully"
+    );
+}
+@PostMapping("/{id}/pause")
+public ApiResponse<String> pauseRoutine(
+        @PathVariable String id
+) {
+
+    routineService.pauseRoutine(id);
+
+    return ApiResponse.success(
+            "Routine paused successfully"
+    );
+}
+@PostMapping("/{id}/resume")
+public ApiResponse<String> resumeRoutine(
+        @PathVariable String id
+) {
+
+    routineService.resumeRoutine(id);
+
+    return ApiResponse.success(
+            "Routine resumed successfully"
+    );
+}
+@GetMapping("/archived")
+public ApiResponse<List<RoutineResponseDTO>>
+getArchivedRoutines(
+        @AuthenticationPrincipal User user
+) {
+
+    return ApiResponse.success(
+            routineService.getArchivedRoutines(
+                    user.getId()
+            )
+    );
+}
 }

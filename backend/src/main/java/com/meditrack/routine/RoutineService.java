@@ -1,89 +1,473 @@
 package com.meditrack.routine;
 
+import com.meditrack.enums.RoutineStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
+
+import com.meditrack.disease.UserDiseaseRepository;
+import com.meditrack.enums.MedicineCategory;
+import com.meditrack.enums.MedicineStatus;
+import com.meditrack.medicine.MedicineScheduleRepository;
+import com.meditrack.medicine.UserMedicine;
+import com.meditrack.medicine.UserMedicineRepository;
+import com.meditrack.disease.UserDisease;
+import com.meditrack.medicine.MedicineSchedule;
+import com.meditrack.enums.ScheduleType;
+
 
 @Service
 @RequiredArgsConstructor
+@Transactional
 public class RoutineService {
 
-    private final MedicineRoutineRepository routineRepository;
-    private final RoutineMedicineRepository routineMedicineRepository;
-    private final RoutineMapper routineMapper;
+    private final RoutineGroupRepository routineGroupRepository;
+    private final RoutineGroupDayRepository routineGroupDayRepository;
+    private final UserMedicineRepository userMedicineRepository;
+    private final UserDiseaseRepository userDiseaseRepository;
+    private final MedicineScheduleRepository medicineScheduleRepository;
 
-    public RoutineResponseDTO createRoutine(String userId, CreateRoutineDTO dto) {
-        MedicineRoutine routine = MedicineRoutine.builder()
-                .userId(userId)
-                .userDiseaseId(dto.getUserDiseaseId())
-                .routineName(dto.getRoutineName())
-                .routineTime(dto.getRoutineTime())
-                .repeatCount(dto.getRepeatCount() != null ? dto.getRepeatCount() : 1)
-                .startDate(dto.getStartDate())
-                .endDate(dto.getEndDate())
-                .reminderTone(dto.getReminderTone())
-                .build();
+    public RoutineResponseDTO createRoutine(
+            CreateRoutineDTO request,
+            String userId
+    ) {
 
-        routineRepository.save(routine);
-        return routineMapper.toCreateResponse(routine);
+        RoutineGroup routine =
+                RoutineMapper.toEntity(request, userId);
+
+        routine.setStatus(RoutineStatus.ACTIVE);
+
+        if (routine.getIsReminderEnabled() == null) {
+            routine.setIsReminderEnabled(true);
+        }
+
+        RoutineGroup savedRoutine =
+                routineGroupRepository.save(routine);
+
+        if (request.getDays() != null &&
+                !request.getDays().isEmpty()) {
+
+            List<RoutineGroupDay> days =
+                    request.getDays()
+                            .stream()
+                            .map(day ->
+                                    RoutineGroupDay.builder()
+                                            .routineGroupId(savedRoutine.getId())
+                                            .dayOfWeek(day)
+                                            .build())
+                            .toList();
+
+            routineGroupDayRepository.saveAll(days);
+        }
+return RoutineMapper.toResponse(
+        savedRoutine,
+        getDiseaseName(
+                savedRoutine.getUserDiseaseId()
+        ),
+        0
+);
+
+        
     }
 
-    public List<RoutineResponseDTO> getRoutines(String userId) {
-        return routineRepository.findByUserIdAndIsDeletedFalse(userId)
+    @Transactional(readOnly = true)
+    public List<RoutineResponseDTO> getAllRoutines(
+            String userId
+    ) {
+
+        return routineGroupRepository
+                .findByUserIdAndStatusInAndIsDeletedFalse(
+        userId,
+        List.of(
+                RoutineStatus.ACTIVE,
+                RoutineStatus.PAUSED
+        )
+)
                 .stream()
-                .map(routineMapper::toListItem)
+             .map(routine -> RoutineMapper.toResponse(
+        routine,
+        getDiseaseName(
+                routine.getUserDiseaseId()
+        ),
+        userMedicineRepository
+                .findByRoutineGroupIdAndIsDeletedFalse(
+                        routine.getId()
+                )
+                .size()
+))
                 .collect(Collectors.toList());
     }
 
-    public RoutineDetailsDTO getRoutineDetails(String userId, String routineId) {
-        MedicineRoutine routine = routineRepository
-                .findByIdAndUserIdAndIsDeletedFalse(routineId, userId)
-                .orElseThrow(() -> new RuntimeException("Routine not found"));
+    @Transactional(readOnly = true)
+    public RoutineDetailsDTO getRoutineById(
+            String routineId
+    ) {
 
-        List<RoutineMedicine> medicines = routineMedicineRepository
-                .findByRoutineIdAndIsDeletedFalse(routineId);
+        RoutineGroup routine =
+                routineGroupRepository.findById(routineId)
+                        .orElseThrow(() ->
+                                new RuntimeException("Routine not found"));
 
-        return routineMapper.toDetailsDTO(routine, medicines);
+        List<RoutineGroupDay> days =
+                routineGroupDayRepository
+                        .findByRoutineGroupIdAndIsDeletedFalse(routineId);
+
+        return RoutineMapper.toDetails(routine, days);
     }
 
-    @Transactional
-    public void updateRoutine(String userId, String routineId, UpdateRoutineDTO dto) {
-        MedicineRoutine routine = routineRepository
-                .findByIdAndUserIdAndIsDeletedFalse(routineId, userId)
-                .orElseThrow(() -> new RuntimeException("Routine not found"));
+    public RoutineResponseDTO updateRoutine(
+            String routineId,
+            UpdateRoutineDTO request
+    ) {
 
-        if (dto.getRoutineName() != null) routine.setRoutineName(dto.getRoutineName());
-        if (dto.getRoutineTime() != null) routine.setRoutineTime(dto.getRoutineTime());
-        if (dto.getRepeatCount() != null) routine.setRepeatCount(dto.getRepeatCount());
-        if (dto.getStartDate() != null) routine.setStartDate(dto.getStartDate());
-        if (dto.getEndDate() != null) routine.setEndDate(dto.getEndDate());
-        if (dto.getReminderTone() != null) routine.setReminderTone(dto.getReminderTone());
+        RoutineGroup routine =
+                routineGroupRepository.findById(routineId)
+                        .orElseThrow(() ->
+                                new RuntimeException("Routine not found"));
 
-        routineRepository.save(routine);
+        routine.setRoutineName(request.getRoutineName());
+        routine.setUserDiseaseId(request.getUserDiseaseId());
+        routine.setRoutineTime(request.getRoutineTime());
+        routine.setFrequencyType(request.getFrequencyType());
+        routine.setStartDate(request.getStartDate());
+        routine.setEndDate(request.getEndDate());
+        routine.setIsReminderEnabled(
+                request.getIsReminderEnabled()
+        );
+
+        RoutineGroup updated =
+                routineGroupRepository.save(routine);
+
+        return RoutineMapper.toResponse(
+        updated,
+        getDiseaseName(
+                updated.getUserDiseaseId()
+        ),
+        userMedicineRepository
+                .findByRoutineGroupIdAndIsDeletedFalse(
+                        updated.getId()
+                )
+                .size()
+);
     }
 
-    public void deleteRoutine(String userId, String routineId) {
-        MedicineRoutine routine = routineRepository
-                .findByIdAndUserIdAndIsDeletedFalse(routineId, userId)
-                .orElseThrow(() -> new RuntimeException("Routine not found"));
+    public void deleteRoutine(
+            String routineId
+    ) {
+
+        RoutineGroup routine =
+                routineGroupRepository.findById(routineId)
+                        .orElseThrow(() ->
+                                new RuntimeException("Routine not found"));
+
         routine.setIsDeleted(true);
-        routineRepository.save(routine);
+        routine.setDeletedAt(LocalDateTime.now());
+
+        routineGroupRepository.save(routine);
     }
 
-    public void addMedicineToRoutine(String routineId, Map<String, String> body) {
-        RoutineMedicine routineMedicine = RoutineMedicine.builder()
-                .routineId(routineId)
-                .userMedicineId(body.get("medicineId"))
-                .dosage(body.get("dosage"))
+    public RoutineMedicineDTO addMedicine(
+        String routineId,
+        AddRoutineMedicineDTO request
+) {
+
+    RoutineGroup routine =
+            routineGroupRepository.findById(routineId)
+                    .orElseThrow(() ->
+                            new RuntimeException("Routine not found"));
+
+   UserMedicine medicine =
+        UserMedicine.builder()
+                .userId(routine.getUserId())
+                .userDiseaseId(routine.getUserDiseaseId())
+                .routineGroupId(routineId)
+
+                .medicineName(request.getMedicineName())
+                .medicineType(request.getMedicineType())
+
+                .dosage(request.getDosage())
+                .notes(request.getNotes())
+
+                .medicineCategory(MedicineCategory.ROUTINE)
+
+                .frequencyType(routine.getFrequencyType())
+
+                .startDate(routine.getStartDate())
+
+                .status(MedicineStatus.ACTIVE)
+
+                .isPaused(false)
+
                 .build();
-        routineMedicineRepository.save(routineMedicine);
+
+    UserMedicine saved =
+            userMedicineRepository.save(medicine);
+
+            ScheduleType scheduleType;
+
+switch (routine.getFrequencyType()) {
+
+    case DAILY:
+        scheduleType = ScheduleType.DAILY;
+        break;
+
+    case WEEKLY:
+    case CUSTOM:
+        scheduleType = ScheduleType.SPECIFIC_DAYS;
+        break;
+
+    case INTERVAL:
+        scheduleType = ScheduleType.EVERY_X_HOURS;
+        break;
+
+    default:
+        scheduleType = ScheduleType.DAILY;
+}
+
+MedicineSchedule schedule =
+        MedicineSchedule.builder()
+                .userMedicineId(saved.getId())
+                .scheduleTime(routine.getRoutineTime())
+                .scheduleType(scheduleType)
+                .isActive(true)
+                .build();
+
+medicineScheduleRepository.save(schedule);
+
+    return RoutineMedicineDTO.builder()
+            .id(saved.getId())
+            .medicineName(saved.getMedicineName())
+            .medicineType(saved.getMedicineType())
+            .dosage(saved.getDosage())
+            .notes(saved.getNotes())
+            .build();
+}
+
+
+@Transactional(readOnly = true)
+public List<RoutineMedicineDTO> getRoutineMedicines(
+        String routineId
+) {
+
+    return userMedicineRepository
+            .findByRoutineGroupIdAndIsDeletedFalse(routineId)
+            .stream()
+            .map(medicine ->
+                    RoutineMedicineDTO.builder()
+                            .id(medicine.getId())
+                            .medicineName(medicine.getMedicineName())
+                            .medicineType(medicine.getMedicineType())
+                            .dosage(medicine.getDosage())
+                            .notes(medicine.getNotes())
+                            .build())
+            .toList();
+}
+
+public void removeMedicine(
+        String routineId,
+        String medicineId
+) {
+
+    UserMedicine medicine =
+            userMedicineRepository
+                    .findByIdAndIsDeletedFalse(medicineId)
+                    .orElseThrow(() ->
+                            new RuntimeException("Medicine not found"));
+
+    if (!routineId.equals(medicine.getRoutineGroupId())) {
+        throw new RuntimeException(
+                "Medicine does not belong to routine"
+        );
     }
 
-    public void removeMedicineFromRoutine(String routineId, String medicineId) {
-        routineMedicineRepository.deleteByRoutineIdAndUserMedicineId(routineId, medicineId);
+    medicine.setIsDeleted(true);
+    medicine.setDeletedAt(LocalDateTime.now());
+
+    userMedicineRepository.save(medicine);
+}
+    @Transactional(readOnly = true)
+public List<DiseaseRoutineDTO> getRoutineDiseases(
+        String userId
+) {
+
+    List<UserDisease> diseases =
+            userDiseaseRepository
+                    .findByUserIdAndIsDeletedFalse(userId);
+
+   return diseases.stream()
+        .map(disease -> {
+
+            int routineCount =
+                    routineGroupRepository
+                            .findByUserDiseaseIdAndIsDeletedFalse(
+                                    disease.getId()
+                            )
+                            .size();
+
+            return DiseaseRoutineDTO.builder()
+                    .diseaseId(disease.getId())
+                    .diseaseName(disease.getDiseaseName())
+                    .routineCount(routineCount)
+                    .build();
+        })
+        .filter(dto -> dto.getRoutineCount() > 0)
+        .toList();
+}
+
+@Transactional(readOnly = true)
+public List<RoutineByDiseaseDTO> getRoutinesByDisease(
+        String diseaseId
+) {
+
+    return routineGroupRepository
+            .findByUserDiseaseIdAndIsDeletedFalse(
+                    diseaseId
+            )
+            .stream()
+            .map(routine -> {
+
+                Integer medicineCount =
+                        userMedicineRepository
+                                .findByRoutineGroupIdAndIsDeletedFalse(
+                                        routine.getId()
+                                )
+                                .size();
+
+                return RoutineByDiseaseDTO.builder()
+                        .routineId(routine.getId())
+                        .routineName(routine.getRoutineName())
+                        .routineTime(routine.getRoutineTime())
+                        .medicineCount(medicineCount)
+                        .build();
+            })
+            .toList();
+}
+
+public RoutineMedicineDTO updateMedicine(
+        String medicineId,
+        UpdateRoutineMedicineDTO request
+) {
+
+    UserMedicine medicine =
+            userMedicineRepository
+                    .findByIdAndIsDeletedFalse(medicineId)
+                    .orElseThrow(() ->
+                            new RuntimeException(
+                                    "Medicine not found"
+                            ));
+
+    medicine.setMedicineName(
+            request.getMedicineName()
+    );
+
+    medicine.setMedicineType(
+            request.getMedicineType()
+    );
+
+    medicine.setDosage(
+            request.getDosage()
+    );
+
+    medicine.setNotes(
+            request.getNotes()
+    );
+
+    UserMedicine updated =
+            userMedicineRepository.save(medicine);
+
+    return RoutineMedicineDTO.builder()
+            .id(updated.getId())
+            .medicineName(updated.getMedicineName())
+            .medicineType(updated.getMedicineType())
+            .dosage(updated.getDosage())
+            .notes(updated.getNotes())
+            .build();
+}
+
+public void archiveRoutine(String routineId) {
+
+    RoutineGroup routine =
+            routineGroupRepository.findById(routineId)
+                    .orElseThrow(() ->
+                            new RuntimeException("Routine not found"));
+
+    routine.setStatus(RoutineStatus.ARCHIVED);
+
+    routineGroupRepository.save(routine);
+}
+
+public void unarchiveRoutine(String routineId) {
+
+    RoutineGroup routine =
+            routineGroupRepository.findById(routineId)
+                    .orElseThrow(() ->
+                            new RuntimeException("Routine not found"));
+
+    routine.setStatus(RoutineStatus.ACTIVE);
+
+    routineGroupRepository.save(routine);
+}
+public void pauseRoutine(String routineId) {
+
+    RoutineGroup routine =
+            routineGroupRepository.findById(routineId)
+                    .orElseThrow(() ->
+                            new RuntimeException("Routine not found"));
+
+    routine.setStatus(RoutineStatus.PAUSED);
+
+    routineGroupRepository.save(routine);
+}
+public void resumeRoutine(String routineId) {
+
+    RoutineGroup routine =
+            routineGroupRepository.findById(routineId)
+                    .orElseThrow(() ->
+                            new RuntimeException("Routine not found"));
+
+    routine.setStatus(RoutineStatus.ACTIVE);
+
+    routineGroupRepository.save(routine);
+}
+
+@Transactional(readOnly = true)
+public List<RoutineResponseDTO> getArchivedRoutines(
+        String userId
+) {
+
+    return routineGroupRepository
+            .findByUserIdAndStatusAndIsDeletedFalse(
+                    userId,
+                    RoutineStatus.ARCHIVED
+            )
+            .stream()
+            .map(routine -> RoutineMapper.toResponse(
+                    routine,
+                    getDiseaseName(routine.getUserDiseaseId()),
+                    userMedicineRepository
+                            .findByRoutineGroupIdAndIsDeletedFalse(
+                                    routine.getId()
+                            )
+                            .size()
+            ))
+            .toList();
+}
+
+private String getDiseaseName(
+        String diseaseId
+) {
+
+    if (diseaseId == null) {
+        return null;
     }
+
+    return userDiseaseRepository
+            .findById(diseaseId)
+            .map(UserDisease::getDiseaseName)
+            .orElse(null);
+}
 }

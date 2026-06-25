@@ -66,6 +66,16 @@ public class MedicineController {
                 .success(true).message("Medicine deleted").build());
     }
 
+    @PutMapping("/schedules/{id}")
+    public ResponseEntity<ApiResponse<MedicineResponseDTO>> updateSchedule(
+            @AuthenticationPrincipal User user,
+            @PathVariable String id,
+            @Valid @RequestBody UpdateScheduleDTO dto) {
+        MedicineResponseDTO response = medicineService.updateSchedule(user.getId(), id, dto);
+        return ResponseEntity.ok(ApiResponse.<MedicineResponseDTO>builder()
+                .success(true).message("Schedule updated").data(response).build());
+    }
+
     @PostMapping("/{id}/pause")
     public ResponseEntity<ApiResponse<?>> pauseMedicine(
             @AuthenticationPrincipal User user,

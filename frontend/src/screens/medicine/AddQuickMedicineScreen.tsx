@@ -83,10 +83,35 @@ export default function AddQuickMedicineScreen() {
   const [modalTarget, setModalTarget] = useState<string>("");
 
   // --- NATIVE DATE/TIME EVENT HANDLERS ---
-  const handleTimeChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
-    setShowTimePicker(Platform.OS === "ios");
-    if (selectedDate) setReminderTime(selectedDate);
-  };
+ const [isPastTimeSelected, setIsPastTimeSelected] = useState(false);
+
+const handleTimeChange = (
+  event: DateTimePickerEvent,
+  selectedTime?: Date
+) => {
+  setShowTimePicker(Platform.OS === "ios");
+
+  if (!selectedTime) return;
+
+  setReminderTime(selectedTime);
+
+  const now = new Date();
+
+  const isToday =
+    startDate &&
+    startDate.toDateString() === now.toDateString();
+
+  if (isToday && selectedTime < now) {
+    setIsPastTimeSelected(true);
+
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    setStartDate(tomorrow);
+  } else {
+    setIsPastTimeSelected(false);
+  }
+};
 
   const handleStartDateChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
     setShowStartDatePicker(Platform.OS === "ios");
@@ -181,40 +206,94 @@ export default function AddQuickMedicineScreen() {
 
     const extractedRemindersCount = parseInt(remindersPerTime.replace(/[^0-9]/g, ""), 10) || 1;
 
-    const payload: any = {
-      diseaseName: diseaseName.trim() || undefined,
-      medicineName: medicineName.trim(),
-      medicineCategory: "QUICK",
-      medicineType,
-      frequencyType,
-      intakeInstruction,
-      startDate: startDate.toISOString().split("T")[0],
-      endDate: endDate ? endDate.toISOString().split("T")[0] : undefined,
-      notes: notes.trim() || undefined,
-      reminderSound,
-      snoozeMinutes: parseInt(snoozeMinutes, 10),
-      schedules: [
-        {
-          scheduleTime: `${hours}:${minutes}`,
-          scheduleType: frequencyType === "INTERVAL" ? "CUSTOM" : frequencyType,
-          remindersCount: extractedRemindersCount,
-        },
-      ],
-    };
+    let schedules: any[] = [];
 
-    if (frequencyType === "WEEKLY") payload.dayOfWeek = selectedWeeklyDay;
-    else if (frequencyType === "INTERVAL") payload.intervalHours = parseInt(selectedIntervalHours, 10);
-    else if (frequencyType === "CUSTOM") payload.selectedDays = selectedCustomDays;
+if (frequencyType === "DAILY") {
+  schedules = [
+    {
+      scheduleTime: `${hours}:${minutes}`,
+      scheduleType: "DAILY",
+    },
+  ];
+}
+
+if (frequencyType === "WEEKLY") {
+  schedules = [
+    {
+      scheduleTime: `${hours}:${minutes}`,
+      scheduleType: "SPECIFIC_DAYS",
+      dayOfWeek: selectedWeeklyDay,
+    },
+  ];
+}
+
+if (frequencyType === "INTERVAL") {
+  schedules = [
+    {
+      scheduleTime: `${hours}:${minutes}`,
+      scheduleType: "EVERY_X_HOURS",
+      intervalHours: parseInt(selectedIntervalHours, 10),
+    },
+  ];
+}
+
+if (frequencyType === "CUSTOM") {
+  schedules = selectedCustomDays.map((day) => ({
+    scheduleTime: `${hours}:${minutes}`,
+    scheduleType: "SPECIFIC_DAYS",
+    dayOfWeek: day,
+  }));
+}
+
+   const payload: any = {
+  diseaseName: diseaseName.trim() || undefined,
+  medicineName: medicineName.trim(),
+  medicineCategory: "QUICK",
+  medicineType,
+  frequencyType,
+  intakeInstruction,
+
+  startDate: `${startDate.getFullYear()}-${String(
+    startDate.getMonth() + 1
+  ).padStart(2, "0")}-${String(startDate.getDate()).padStart(2, "0")}`,
+
+  endDate: endDate
+    ? `${endDate.getFullYear()}-${String(
+        endDate.getMonth() + 1
+      ).padStart(2, "0")}-${String(endDate.getDate()).padStart(2, "0")}`
+    : undefined,
+
+  notes: notes.trim() || undefined,
+
+  reminderSound,
+
+  snoozeMinutes: parseInt(snoozeMinutes, 10),
+
+  schedules,
+};
+
+  
 
     try {
+
+      console.log(
+  "MEDICINE PAYLOAD",
+  JSON.stringify(payload, null, 2)
+);
       await addMedicine(payload);
       navigation.navigate('MedicineAddedSuccessScreen', {
         medicineName: medicineName,
         medicineType: medicineType,
         reminderTime: timeFormatted,
         frequencyType: frequencyType,
-        startDate: startDate.toISOString().split("T")[0],
-        endDate: endDate ? endDate.toISOString().split("T")[0] : undefined,
+        startDate: `${startDate.getFullYear()}-${String(
+  startDate.getMonth() + 1
+).padStart(2, "0")}-${String(startDate.getDate()).padStart(2, "0")}`,
+        endDate: endDate
+  ? `${endDate.getFullYear()}-${String(
+      endDate.getMonth() + 1
+    ).padStart(2, "0")}-${String(endDate.getDate()).padStart(2, "0")}`
+  : undefined,
         notes: notes,
         intakeInstruction: intakeInstruction,
       });
@@ -314,6 +393,18 @@ export default function AddQuickMedicineScreen() {
             onChange={handleTimeChange} 
           />
         )}
+        {isPastTimeSelected && (
+  <View style={styles.infoBox}>
+    <Ionicons
+      name="information-circle-outline"
+      size={18}
+      color="#D97706"
+    />
+    <Text style={styles.infoText}>
+      Selected time has already passed today. Start date automatically moved to tomorrow.
+    </Text>
+  </View>
+)}
 
         <Text style={styles.label}>Repeat Settings</Text>
         <View style={styles.repeatSchedulingCard}>
@@ -702,4 +793,22 @@ const styles = StyleSheet.create({
   modalSheetTitle: { fontSize: 16, fontWeight: "700", color: "#1A2E40", marginBottom: 12 },
   modalOptionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14, borderBottomWidth: 1, borderColor: "#F7FAFC" },
   modalOptionLabel: { fontSize: 15, color: "#2D3748", fontWeight: "500" },
+  infoBox: {
+  flexDirection: "row",
+  alignItems: "flex-start",
+  backgroundColor: "#FFF7ED",
+  borderRadius: 12,
+  padding: 12,
+  marginTop: 10,
+  borderWidth: 1,
+  borderColor: "#FED7AA",
+},
+
+infoText: {
+  flex: 1,
+  marginLeft: 8,
+  fontSize: 13,
+  color: "#92400E",
+  lineHeight: 18,
+},
 });

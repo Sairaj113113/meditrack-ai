@@ -12,26 +12,53 @@ import java.util.Optional;
 
 public interface MedicineRepository extends JpaRepository<Medicine, String> {
 
-    List<Medicine> findByUserIdAndIsDeletedFalse(String userId);
 
-    List<Medicine> findByUserIdAndMedicineCategoryAndIsDeletedFalse(
-            String userId, MedicineCategory category);
+    // Latest created medicines first
+    List<Medicine> findByUserIdAndIsDeletedFalseOrderByCreatedAtDesc(
+            String userId
+    );
 
-    List<Medicine> findByUserIdAndStatusAndIsDeletedFalse(
-            String userId, MedicineStatus status);
 
-    Optional<Medicine> findByIdAndUserIdAndIsDeletedFalse(String id, String userId);
+    // Category filter + latest first
+    List<Medicine> findByUserIdAndMedicineCategoryAndIsDeletedFalseOrderByCreatedAtDesc(
+            String userId,
+            MedicineCategory category
+    );
+
+    // Active category filter + latest first
+    List<Medicine> findByUserIdAndMedicineCategoryAndStatusAndIsDeletedFalseOrderByCreatedAtDesc(
+            String userId,
+            MedicineCategory category,
+            MedicineStatus status
+    );
+
+    // Archived medicines latest first
+    List<Medicine> findByUserIdAndStatusAndIsDeletedFalseOrderByCreatedAtDesc(
+            String userId,
+            MedicineStatus status
+    );
+
+
+    Optional<Medicine> findByIdAndUserIdAndIsDeletedFalse(
+            String id,
+            String userId
+    );
+
 
     @Query("""
         SELECT m FROM Medicine m
-        JOIN MedicineSchedule s ON s.userMedicineId = m.id
+        JOIN MedicineSchedule s 
+        ON s.userMedicineId = m.id
         WHERE m.userId = :userId
         AND m.medicineCategory = 'ROUTINE'
+        AND m.status = com.meditrack.enums.MedicineStatus.ACTIVE
         AND m.isDeleted = false
         AND s.scheduleType = :scheduleType
         AND s.isActive = true
+        ORDER BY m.createdAt DESC
     """)
     List<Medicine> findRoutineByPeriod(
             @Param("userId") String userId,
-            @Param("scheduleType") ScheduleType scheduleType);
+            @Param("scheduleType") ScheduleType scheduleType
+    );
 }

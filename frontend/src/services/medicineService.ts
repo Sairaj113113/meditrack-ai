@@ -9,6 +9,21 @@ export const addMedicine = async (payload: any) => {
   return response.data.data;
 };
 
+export const updateMedicine = async (id: string, payload: any) => {
+  const response = await apiClient.put(`/medicines/${id}`, payload);
+  return response.data.data;
+};
+
+export const updateSchedule = async (id: string, payload: any) => {
+  const response = await apiClient.put(`/medicines/schedules/${id}`, payload);
+  return response.data.data;
+};
+
+export const getMedicineById = async (id: string) => {
+  const response = await apiClient.get(`/medicines/${id}`);
+  return response.data.data;
+};
+
 export const getMedicines = async (
   category?: string,
   period?: string

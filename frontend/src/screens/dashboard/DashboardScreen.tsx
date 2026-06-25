@@ -34,27 +34,111 @@ const safeRequireSvg = () => {
   }
 };
 
+const safeRequireDashboardService = () => {
+  try {
+    const service = require('../../services/dashboardService');
+    return service?.default ?? service;
+  } catch (e) {
+    return null;
+  }
+};
+
 const RN = safeRequireRN();
 const ExpoIcons = safeRequireIcons();
 const ReactNavigation = safeRequireNavigation();
 const RNSvg = safeRequireSvg();
+const DashboardService = safeRequireDashboardService();
 
 // Local project relative mock stores (to prevent compile failures if references are empty in web preview)
 let useAuthStore: any = () => ({ user: { firstName: 'Alex' } });
-let getDashboard: any = async () => ({
-  todayAdherencePercentage: 75,
-  takenCount: 3,
-  pendingCount: 1,
-  missedCount: 0,
-  currentStreak: 5,
-  totalMedicines: 4,
-  todayMedicines: [
-    { medicineName: 'Metformin 500mg', scheduledTime: '08:00 AM', status: 'TAKEN' },
-    { medicineName: 'Vitamin D3 60K', scheduledTime: '09:00 AM', status: 'TAKEN' },
-    { medicineName: 'Amlodipine 5mg', scheduledTime: '08:00 PM', status: 'PENDING' },
-    { medicineName: 'Atorvastatin 10mg', scheduledTime: '10:00 PM', status: 'PENDING' }
-  ]
-});
+let apiClient: any = null;
+
+let fallbackTodayReminders: any[] = [
+  {
+    sessionId: 'session_id_1',
+    sessionTime: '08:00 AM',
+    status: 'PENDING',
+    medicineCount: 2,
+    medicines: [
+      { userMedicineId: 'med_1', medicineName: 'Metformin 500mg', status: 'TAKEN' },
+      { userMedicineId: 'med_2', medicineName: 'Vitamin D3 60K', status: 'MISSED' }
+    ]
+  },
+  {
+    sessionId: 'session_id_2',
+    sessionTime: '08:00 PM',
+    status: 'PENDING',
+    medicineCount: 1,
+    medicines: [
+      { userMedicineId: 'med_3', medicineName: 'Amlodipine 5mg', status: 'PENDING' }
+    ]
+  }
+];
+
+const getDashboardData = async () => {
+  if (!DashboardService || !DashboardService.getDashboard) {
+    return null;
+  }
+
+  const response = await DashboardService.getDashboard();
+  return response;
+};
+
+const getTodayReminders = async () => {
+  if (!apiClient) {
+    return fallbackTodayReminders;
+  }
+
+  const response = await apiClient.get('/reminders/today');
+  const payload = response?.data;
+  const list = payload?.data !== undefined ? payload.data : (Array.isArray(payload) ? payload : []);
+  return Array.isArray(list) ? list : [];
+};
+
+const getTodayMedicines = async () => {
+  if (!apiClient) {
+    return [];
+  }
+
+  const response = await apiClient.get('/medicines');
+  const payload = response?.data;
+  const list = payload?.data !== undefined ? payload.data : (Array.isArray(payload) ? payload : []);
+  return Array.isArray(list) ? list : [];
+};
+
+const isMedicineActiveToday = (medicine: any) => {
+  const today = new Date();
+  const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+  const parseDateValue = (value: any) => {
+    if (!value) return null;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  };
+
+  const startDate = parseDateValue(medicine.startDate);
+  const endDate = parseDateValue(medicine.endDate);
+
+  if (!startDate || startDate > todayOnly) return false;
+  if (endDate && todayOnly > endDate) return false;
+  return true;
+};
+
+const getTotalTodayMedicines = (medicines: any[]) => {
+  return medicines.reduce((count, medicine) => {
+    if (!isMedicineActiveToday(medicine)) {
+      return count;
+    }
+
+    const schedules = Array.isArray(medicine.schedules) && medicine.schedules.length > 0
+      ? medicine.schedules
+      : [{ scheduleTime: '', isActive: true }];
+
+    const activeScheduleCount = schedules.filter((schedule: any) => schedule.isActive !== false).length;
+    return count + activeScheduleCount;
+  }, 0);
+};
 
 try {
   const authStore = require('../../store/authStore');
@@ -62,8 +146,9 @@ try {
 } catch (e) {}
 
 try {
-  const dashService = require('../../services/dashboardService');
-  if (dashService && dashService.getDashboard) getDashboard = dashService.getDashboard;
+  const client = require('../../services/apiClient');
+  if (client && client.default) apiClient = client.default;
+  else if (client) apiClient = client;
 } catch (e) {}
 
 const isWeb = !RN;
@@ -124,11 +209,47 @@ export default function DashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [showMedicineSheet, setShowMedicineSheet] = useState(false);
 
+  const calculateDashboardStats = (todayReminders: any[], totalTodayMedicines: number) => {
+    const todayMedicines = todayReminders.flatMap((session: any) => {
+      const medicines = Array.isArray(session.medicines) ? session.medicines : [];
+      return medicines.map((medicine: any) => ({
+        ...medicine,
+        sessionId: session.sessionId,
+        sessionTime: session.sessionTime,
+      }));
+    });
+
+    const takenCount = todayMedicines.filter((med: any) => med.status === 'TAKEN').length;
+    const missedCount = todayMedicines.filter((med: any) => med.status === 'MISSED').length;
+    const skippedCount = todayMedicines.filter((med: any) => med.status === 'SKIPPED').length;
+    const pendingCount = Math.max(totalTodayMedicines - takenCount - missedCount - skippedCount, 0);
+    const progressPercentage = totalTodayMedicines > 0 ? (takenCount / totalTodayMedicines) * 100 : 0;
+
+    return {
+      totalTodayMedicines,
+      takenCount,
+      missedCount,
+      pendingCount,
+      skippedCount,
+      progressPercentage,
+      todayMedicines,
+    };
+  };
+
   // --- RE-FETCH DATA ON FOCUS & REFRESH ---
   const fetchData = async () => {
     try {
-      const data = await getDashboard();
-      setDashboard(data);
+      const dashboardResponse = await getDashboardData();
+
+      if (dashboardResponse) {
+        setDashboard(dashboardResponse);
+        console.log("Dashboard =", dashboard);
+      } else {
+        const [medicines, reminders] = await Promise.all([getTodayMedicines(), getTodayReminders()]);
+        const totalTodayMedicines = getTotalTodayMedicines(medicines);
+        const stats = calculateDashboardStats(reminders, totalTodayMedicines);
+        setDashboard(stats);
+      }
     } catch (error) {
       console.log('Dashboard error:', error);
     } finally {
@@ -149,8 +270,12 @@ export default function DashboardScreen() {
     fetchData();
   }, []);
 
-  const adherencePercent = dashboard?.todayAdherencePercentage || 0;
-  const strokeDashoffset = CIRCUMFERENCE - (adherencePercent / 100) * CIRCUMFERENCE;
+ const adherencePercent =
+  dashboard?.todayAdherencePercentage ?? 0;
+
+const strokeDashoffset =
+  CIRCUMFERENCE -
+  (Math.min(adherencePercent, 100) / 100) * CIRCUMFERENCE;
   const firstName = user?.firstName || 'User';
 
   // --- RENDERS THE INTERACTIVE WEB PREVIEW FRAME ---
@@ -212,39 +337,62 @@ export default function DashboardScreen() {
                 <div className="flex-1 space-y-2">
                   <div className="flex items-center justify-between text-xs font-bold text-slate-600">
                     <span className="flex items-center"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500 mr-2" /> Taken</span>
-                    <span className="text-slate-800">{dashboard?.takenCount || 3}</span>
+                    <span className="text-slate-800">{dashboard?.takenCount ?? 0}</span>
                   </div>
                   <div className="h-px bg-slate-50" />
                   <div className="flex items-center justify-between text-xs font-bold text-slate-600">
                     <span className="flex items-center"><span className="w-2.5 h-2.5 rounded-full bg-orange-400 mr-2" /> Pending</span>
-                    <span className="text-slate-800">{dashboard?.pendingCount || 1}</span>
+                    <span className="text-slate-800">{dashboard?.pendingCount ?? 0}</span>
                   </div>
                   <div className="h-px bg-slate-50" />
                   <div className="flex items-center justify-between text-xs font-bold text-slate-600">
                     <span className="flex items-center"><span className="w-2.5 h-2.5 rounded-full bg-red-400 mr-2" /> Missed</span>
-                    <span className="text-slate-800">{dashboard?.missedCount || 0}</span>
+                    <span className="text-slate-800">{dashboard?.missedCount ?? 0}</span>
+                  </div>
+                  <div className="h-px bg-slate-50" />
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-600">
+                    <span className="flex items-center"><span className="w-2.5 h-2.5 rounded-full bg-purple-500 mr-2" /> Skipped</span>
+                    <span className="text-slate-800">{dashboard?.skippedCount ?? 0}</span>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Streak Grid row */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-white p-4 rounded-2xl border border-slate-100 flex items-center space-x-3 shadow-sm">
-                <span className="text-2xl">🔥</span>
-                <div>
-                  <h5 className="text-[12px] font-bold text-slate-800">{dashboard?.currentStreak || 5} Day Streak</h5>
-                  <p className="text-[10px] text-slate-400 font-medium">Keep it up!</p>
-                </div>
-              </div>
-              <div className="bg-white p-4 rounded-2xl border border-slate-100 flex items-center space-x-3 shadow-sm">
-                <div className="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600 text-lg">💊</div>
-                <div>
-                  <h5 className="text-[12px] font-bold text-slate-800">{dashboard?.totalMedicines || 4} Medicines</h5>
-                  <p className="text-[10px] text-slate-400 font-medium">Today</p>
-                </div>
-              </div>
-            </div>
+           {/* Today's Medicines + Streak */}
+<div className="grid grid-cols-2 gap-3">
+<div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+
+  <div className="text-3xl mb-2">
+    💊
+  </div>
+
+  <h5 className="text-[12px] font-bold text-slate-500">
+    Today's Medicines
+  </h5>
+
+  <p className="text-5xl font-bold text-slate-900 mt-2">
+    {dashboard?.totalMedicines ?? 0}
+  </p>
+
+  <p className="text-[10px] text-slate-400 font-medium mt-2">
+    Total Scheduled
+  </p>
+
+</div>
+
+  <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+    <div className="text-2xl mb-1">🔥</div>
+
+    <p className="text-3xl font-bold text-slate-900">
+      {dashboard?.currentStreak ?? 0}
+    </p>
+
+    <p className="text-[10px] text-slate-400 font-medium">
+      Day Streak
+    </p>
+  </div>
+
+</div>
 
             {/* Medication Calendar Strip */}
             <div className="bg-white rounded-2xl p-4 border border-slate-100 flex items-center justify-between shadow-sm cursor-pointer hover:bg-slate-50 transition-all">
@@ -258,30 +406,6 @@ export default function DashboardScreen() {
               <span className="text-[#289254] font-bold text-lg">❯</span>
             </div>
 
-            {/* Today's Schedule Card list */}
-            <div className="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm space-y-3">
-              <h4 className="font-extrabold text-slate-800 text-sm mb-2">Today's Medicines</h4>
-              {dashboard?.todayMedicines ? (
-                dashboard.todayMedicines.map((med: any, index: number) => (
-                  <div key={index} className="flex items-center justify-between border-b border-slate-50 pb-2 last:border-0 last:pb-0">
-                    <div className="flex items-center space-x-3">
-                      <span className="text-emerald-600 text-lg">💊</span>
-                      <div>
-                        <h5 className="text-xs font-bold text-slate-800">{med.medicineName}</h5>
-                        <p className="text-[10px] text-slate-400 font-semibold">{med.scheduledTime}</p>
-                      </div>
-                    </div>
-                    <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-extrabold ${
-                      med.status === 'TAKEN' ? 'bg-emerald-50 text-emerald-600' : 'bg-orange-50 text-orange-500'
-                    }`}>
-                      {med.status}
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <p className="text-xs text-slate-400 text-center py-4">No medication schedule logged yet.</p>
-              )}
-            </div>
           </div>
 
           {/* Sticky FAB */}
@@ -409,8 +533,18 @@ export default function DashboardScreen() {
                 />
               </Svg>
               <View style={styles.circleCenter}>
-                <Text style={styles.percentTxt}>{Math.round(adherencePercent)}%</Text>
-                <Text style={styles.completedTxt}>Completed</Text>
+                <View style={styles.circleCenter}>
+  <Text style={styles.progressPercent}>
+    {Math.round(
+      dashboard?.todayAdherencePercentage ?? 0
+    )}%
+  </Text>
+
+  <Text style={styles.progressLabel}>
+    Progress
+  </Text>
+</View>
+               
               </View>
             </View>
 
@@ -427,39 +561,54 @@ export default function DashboardScreen() {
                 <Text style={styles.statVal}>{dashboard?.pendingCount || 0}</Text>
               </View>
               <View style={styles.divider} />
-              <View style={styles.statItem}>
+                <View style={styles.statItem}>
                 <View style={[styles.statDot, { backgroundColor: '#F44336' }]} />
                 <Text style={styles.statLbl}>Missed</Text>
                 <Text style={styles.statVal}>{dashboard?.missedCount || 0}</Text>
+              </View>
+              <View style={styles.divider} />
+              <View style={styles.statItem}>
+                <View style={[styles.statDot, { backgroundColor: '#8B5CF6' }]} />
+                <Text style={styles.statLbl}>Skipped</Text>
+                <Text style={styles.statVal}>{dashboard?.skippedCount || 0}</Text>
               </View>
             </View>
           </View>
         </View>
 
-        {/* Streak + Medicines */}
-        <View style={styles.rowCards}>
-          <View style={styles.miniCard}>
-            <Text style={styles.miniIcon}>🔥</Text>
-            <View>
-              <Text style={styles.miniVal}>
-                {dashboard?.currentStreak || 0} Day Streak
-              </Text>
-              <Text style={styles.miniSub}>Keep it up!</Text>
-            </View>
-          </View>
+       <View style={styles.statsRow}>
 
-          <View style={styles.miniCard}>
-            <View style={styles.miniIconBox}>
-              <Ionicons name="medkit" size={20} color="#00C853" />
-            </View>
-            <View>
-              <Text style={styles.miniVal}>
-                {dashboard?.totalMedicines || 0} Medicines
-              </Text>
-              <Text style={styles.miniSub}>Today</Text>
-            </View>
-          </View>
-        </View>
+  {/* Today's Medicine Count */}
+  <View style={styles.halfCard}>
+
+  <Text style={styles.streakEmoji}>💊</Text>
+
+  
+
+  <Text style={styles.halfCardValue}>
+    {dashboard?.totalMedicines ?? 0}
+  </Text>
+
+  <Text style={styles.halfCardSubtitle}>
+    Medicines Scheduled Today
+  </Text>
+
+</View>
+
+  {/* Streak Card */}
+  <View style={styles.halfCard}>
+    <Text style={styles.streakEmoji}>🔥</Text>
+
+    <Text style={styles.halfCardValue}>
+      {dashboard?.currentStreak || 0}
+    </Text>
+
+    <Text style={styles.halfCardSubtitle}>
+      Day Streak
+    </Text>
+  </View>
+
+</View>
 
         {/* Medication Calendar Button */}
         <TouchableOpacity
@@ -478,40 +627,7 @@ export default function DashboardScreen() {
           <Ionicons name="chevron-forward" size={20} color="#00C853" />
         </TouchableOpacity>
 
-        {/* Today's Medicines list */}
-        {dashboard?.todayMedicines?.length > 0 && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Today's Medicines</Text>
-            {dashboard.todayMedicines.map((med: any, index: number) => (
-              <View key={index} style={styles.medRow}>
-                <View style={styles.medIconBox}>
-                  <Ionicons name="medical" size={16} color="#289254" />
-                </View>
-                <View style={styles.medInfo}>
-                  <Text style={styles.medName}>{med.medicineName}</Text>
-                  <Text style={styles.medTime}>{med.scheduledTime}</Text>
-                </View>
-                <View style={[
-                  styles.medStatus,
-                  med.status === 'TAKEN' && { backgroundColor: '#E8FAF0' },
-                  med.status === 'PENDING' && { backgroundColor: '#FFF3E0' },
-                  med.status === 'MISSED' && { backgroundColor: '#FFEBEE' },
-                ]}>
-                  <Text style={[
-                    styles.medStatusTxt,
-                    med.status === 'TAKEN' && { color: '#00C853' },
-                    med.status === 'PENDING' && { color: '#FF9800' },
-                    med.status === 'MISSED' && { color: '#F44336' },
-                  ]}>
-                    {med.status}
-                  </Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
-
-        <View style={{ height: 120 }} />
+        <View style={{ height: 180 }} />
       </ScrollView>
 
       {/* Add Medicine FAB */}
@@ -660,7 +776,7 @@ const styles: any = {
     marginBottom: 18,
   },
   cardTitle: { fontSize: 16, fontWeight: '700', color: '#0B1F3A' },
-  viewDetails: { fontSize: 12, color: '#00C853', fontWeight: '600' },
+  viewDetails: { fontSize: 12, color: '#289254', fontWeight: '600' },
 
   progressRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   circleWrap: {
@@ -742,35 +858,9 @@ const styles: any = {
   calendarBtnTitle: { fontSize: 15, fontWeight: '700', color: '#0B1F3A' },
   calendarBtnSub: { fontSize: 12, color: '#6B7280', marginTop: 2 },
 
-  medRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 10,
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#F3F4F6',
-  },
-  medIconBox: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: '#E8FAF0',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  medInfo: { flex: 1 },
-  medName: { fontSize: 14, fontWeight: '600', color: '#0B1F3A' },
-  medTime: { fontSize: 12, color: '#6B7280', marginTop: 2 },
-  medStatus: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 20,
-  },
-  medStatusTxt: { fontSize: 11, fontWeight: '700' },
-
   fab: {
     position: 'absolute',
-    bottom: 80,
+    bottom: 24,
     left: 24,
     right: 24,
     backgroundColor: '#289254',
@@ -824,4 +914,58 @@ const styles: any = {
     color: '#6B7280',
     marginTop: 4,
   },
+  statsRow: {
+  flexDirection: "row",
+  justifyContent: "space-between",
+  marginHorizontal: 20,
+  marginTop: 16,
+},
+
+halfCard: {
+  backgroundColor: "#FFFFFF",
+  borderRadius: 24,
+  padding: 20,
+  width: "48%",
+  shadowColor: "#000",
+  shadowOffset: {
+    width: 0,
+    height: 2,
+  },
+  shadowOpacity: 0.05,
+  shadowRadius: 8,
+  elevation: 3,
+},
+
+halfCardTitle: {
+  fontSize: 14,
+  fontWeight: "600",
+  color: "#64748B",
+},
+
+halfCardValue: {
+  fontSize: 32,
+  fontWeight: "800",
+  color: "#0F172A",
+  marginTop: 10,
+},
+
+halfCardSubtitle: {
+  fontSize: 13,
+  color: "#94A3B8",
+  marginTop: 4,
+},
+
+streakEmoji: {
+  fontSize: 30,
+},
+progressPercent: {
+  fontSize: 28,
+  fontWeight: "900",
+  color: "#0F172A",
+},
+progressLabel: {
+  fontSize: 12,
+  color: "#64748B",
+  marginTop: 2,
+},
 };

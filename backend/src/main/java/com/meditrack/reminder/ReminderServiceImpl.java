@@ -12,6 +12,9 @@ import java.time.*;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import com.meditrack.tracking.MedicineIntakeLog;
+import com.meditrack.tracking.MedicineIntakeLogRepository;
+
 @Service
 @RequiredArgsConstructor
 public class ReminderServiceImpl implements ReminderService {
@@ -22,6 +25,8 @@ public class ReminderServiceImpl implements ReminderService {
     private final MedicineIntakeLogRepository intakeLogRepository;
     private final DailyAdherenceRepository dailyAdherenceRepository;
     private final AdherenceStreakRepository streakRepository;
+
+    private final AdherenceCalculationService adherenceCalculationService;
 
     @Override
     public List<ReminderResponseDTO> getTodayReminders(String userId) {
@@ -66,16 +71,27 @@ public class ReminderServiceImpl implements ReminderService {
             m.setStatus(ReminderMedicineStatus.TAKEN);
             sessionMedicineRepository.save(m);
 
-            MedicineIntakeLog log = MedicineIntakeLog.builder()
-                    .userId(session.getUserId())
-                    .userMedicineId(m.getUserMedicineId())
-                    .intakeDate(LocalDate.now())
-                    .scheduledTime(session.getScheduledTime().toLocalTime())
-                    .action(IntakeAction.TAKEN)
-                    .markedBy(MarkedBy.USER)
-                    .actionTime(LocalDateTime.now())
-                    .build();
-            intakeLogRepository.save(log);
+           MedicineIntakeLog log =
+        intakeLogRepository
+                .findFirstByUserMedicineIdAndIntakeDateAndScheduledTime(
+                        m.getUserMedicineId(),
+                        LocalDate.now(),
+                        session.getScheduledTime().toLocalTime()
+                )
+                .orElse(
+                        MedicineIntakeLog.builder()
+                                .userId(session.getUserId())
+                                .userMedicineId(m.getUserMedicineId())
+                                .intakeDate(LocalDate.now())
+                                .scheduledTime(session.getScheduledTime().toLocalTime())
+                                .build()
+                );
+
+log.setAction(IntakeAction.TAKEN); // SKIPPED in markAllSkipped
+log.setMarkedBy(MarkedBy.USER);
+log.setActionTime(LocalDateTime.now());
+
+intakeLogRepository.save(log);
         });
 
         session.setStatus(ReminderStatus.COMPLETED);
@@ -97,16 +113,27 @@ public class ReminderServiceImpl implements ReminderService {
             m.setStatus(ReminderMedicineStatus.SKIPPED);
             sessionMedicineRepository.save(m);
 
-            MedicineIntakeLog log = MedicineIntakeLog.builder()
-                    .userId(session.getUserId())
-                    .userMedicineId(m.getUserMedicineId())
-                    .intakeDate(LocalDate.now())
-                    .scheduledTime(session.getScheduledTime().toLocalTime())
-                    .action(IntakeAction.SKIPPED)
-                    .markedBy(MarkedBy.USER)
-                    .actionTime(LocalDateTime.now())
-                    .build();
-            intakeLogRepository.save(log);
+           MedicineIntakeLog log =
+        intakeLogRepository
+                .findFirstByUserMedicineIdAndIntakeDateAndScheduledTime(
+                        m.getUserMedicineId(),
+                        LocalDate.now(),
+                        session.getScheduledTime().toLocalTime()
+                )
+                .orElse(
+                        MedicineIntakeLog.builder()
+                                .userId(session.getUserId())
+                                .userMedicineId(m.getUserMedicineId())
+                                .intakeDate(LocalDate.now())
+                                .scheduledTime(session.getScheduledTime().toLocalTime())
+                                .build()
+                );
+
+log.setAction(IntakeAction.SKIPPED);
+log.setMarkedBy(MarkedBy.USER);
+log.setActionTime(LocalDateTime.now());
+
+intakeLogRepository.save(log);
         });
 
         session.setStatus(ReminderStatus.COMPLETED);
@@ -185,16 +212,27 @@ public class ReminderServiceImpl implements ReminderService {
             default -> IntakeAction.MISSED;
         };
 
-        MedicineIntakeLog log = MedicineIntakeLog.builder()
-                .userId(session.getUserId())
-                .userMedicineId(medicineId)
-                .intakeDate(LocalDate.now())
-                .scheduledTime(session.getScheduledTime().toLocalTime())
-                .action(action)
-                .markedBy(MarkedBy.USER)
-                .actionTime(LocalDateTime.now())
-                .build();
-        intakeLogRepository.save(log);
+        MedicineIntakeLog log =
+        intakeLogRepository
+                .findFirstByUserMedicineIdAndIntakeDateAndScheduledTime(
+                        medicineId,
+                        LocalDate.now(),
+                        session.getScheduledTime().toLocalTime()
+                )
+                .orElse(
+                        MedicineIntakeLog.builder()
+                                .userId(session.getUserId())
+                                .userMedicineId(medicineId)
+                                .intakeDate(LocalDate.now())
+                                .scheduledTime(session.getScheduledTime().toLocalTime())
+                                .build()
+                );
+
+log.setAction(action);
+log.setMarkedBy(MarkedBy.USER);
+log.setActionTime(LocalDateTime.now());
+
+intakeLogRepository.save(log);
 
         updateSessionStatus(session);
         updateDailyAdherence(session.getUserId(), LocalDate.now());
@@ -223,28 +261,7 @@ public class ReminderServiceImpl implements ReminderService {
     @Override
     @Transactional
     public void updateDailyAdherence(String userId, LocalDate date) {
-        List<MedicineIntakeLog> logs = intakeLogRepository
-                .findByUserIdAndIntakeDate(userId, date);
-
-        int taken = (int) logs.stream().filter(l -> l.getAction() == IntakeAction.TAKEN).count();
-        int missed = (int) logs.stream().filter(l -> l.getAction() == IntakeAction.MISSED).count();
-        int skipped = (int) logs.stream().filter(l -> l.getAction() == IntakeAction.SKIPPED).count();
-        int total = logs.size();
-        double percentage = total > 0 ? (taken * 100.0 / total) : 0.0;
-
-        DailyAdherence adherence = dailyAdherenceRepository
-                .findByUserIdAndDate(userId, date)
-                .orElseGet(() -> DailyAdherence.builder()
-                        .userId(userId).date(date).build());
-
-        adherence.setTotalMedicines(total);
-        adherence.setTakenCount(taken);
-        adherence.setMissedCount(missed);
-        adherence.setSkippedCount(skipped);
-        adherence.setAdherencePercentage(percentage);
-        dailyAdherenceRepository.save(adherence);
-
-        updateStreak(userId, date, percentage);
+        adherenceCalculationService.recalculate(userId, date);
     }
 
     private void updateStreak(String userId, LocalDate date, double percentage) {

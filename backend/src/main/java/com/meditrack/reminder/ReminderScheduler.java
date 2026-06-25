@@ -12,6 +12,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.*;
 import java.util.List;
 
+import com.meditrack.tracking.MedicineIntakeLog;
+import com.meditrack.tracking.MedicineIntakeLogRepository;
+
 @Slf4j
 @Component
 @EnableScheduling
@@ -23,9 +26,14 @@ public class ReminderScheduler {
     private final ReminderSessionRepository sessionRepository;
     private final ReminderSessionMedicineRepository sessionMedicineRepository;
     private final ReminderService reminderService;
+    private final MedicineScheduleEvaluator scheduleEvaluator;
+
+    private final MedicineIntakeLogRepository intakeLogRepository;
+
+    
 
     @Scheduled(fixedRate = 60000) // every minute
-@Scheduled(fixedRate = 60000)
+
 @Transactional
 public void createReminderSessions() {
 
@@ -68,17 +76,25 @@ public void createReminderSessions() {
             continue;
         }
 
-        if (medicine.getIsDeleted()) {
-            log.info("Skipped: Medicine Deleted");
-            continue;
-        }
+       if (medicine.getIsDeleted()) {
+    log.info("Skipped: Medicine Deleted");
+    continue;
+}
 
-        // DEV FIX
-        // Create reminder if scheduled time has already arrived
-        if (scheduleTime.isAfter(currentTime)) {
-            log.info("Skipped: Future Schedule");
-            continue;
-        }
+if (!scheduleEvaluator.isDueToday(
+        medicine,
+        schedule,
+        today
+)) {
+    log.info("Skipped: Not Due Today");
+    continue;
+}
+
+// DEV FIX
+if (scheduleTime.isAfter(currentTime)) {
+    log.info("Skipped: Future Schedule");
+    continue;
+}
 
         String userId = medicine.getUserId();
 
@@ -156,12 +172,36 @@ public void createReminderSessions() {
             List<ReminderSessionMedicine> medicines = sessionMedicineRepository
                     .findByReminderSessionId(session.getId());
 
-            medicines.stream()
-                    .filter(m -> m.getStatus() == ReminderMedicineStatus.PENDING)
-                    .forEach(m -> {
-                        m.setStatus(ReminderMedicineStatus.MISSED);
-                        sessionMedicineRepository.save(m);
-                    });
+           medicines.stream()
+        .filter(m -> m.getStatus() == ReminderMedicineStatus.PENDING)
+        .forEach(m -> {
+
+            m.setStatus(ReminderMedicineStatus.MISSED);
+            sessionMedicineRepository.save(m);
+
+            MedicineIntakeLog log =
+                    intakeLogRepository
+                            .findFirstByUserMedicineIdAndIntakeDateAndScheduledTime(
+                                    m.getUserMedicineId(),
+                                    LocalDate.now(),
+                                    session.getScheduledTime().toLocalTime()
+                            )
+                            .orElse(
+                                    MedicineIntakeLog.builder()
+                                            .userId(session.getUserId())
+                                            .userMedicineId(m.getUserMedicineId())
+                                            .intakeDate(LocalDate.now())
+                                            .scheduledTime(session.getScheduledTime().toLocalTime())
+                                            .build()
+                            );
+
+            log.setAction(IntakeAction.MISSED);
+            log.setMarkedBy(MarkedBy.SYSTEM);
+            log.setActionTime(LocalDateTime.now());
+
+            intakeLogRepository.save(log);
+
+        });
 
             session.setStatus(ReminderStatus.MISSED);
             sessionRepository.save(session);

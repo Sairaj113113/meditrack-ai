@@ -39,6 +39,7 @@ apiClient.interceptors.response.use(
         await SecureStore.setItemAsync('refreshToken', newRefreshToken);
 
         originalRequest.headers.Authorization = `Bearer ${accessToken}`;
+        console.log("TOKEN =", accessToken);
         return apiClient(originalRequest);
       } catch (refreshError) {
         await SecureStore.deleteItemAsync('accessToken');

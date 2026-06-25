@@ -247,48 +247,103 @@ export default function MedicineListScreen() {
     return { statusByIdAndTime, statusById, sessionByIdAndTime };
   };
 
-  const buildTodayMedicineEntries = () => {
-    const safeMedicines = Array.isArray(allMedicines) ? allMedicines : [];
-    const { statusByIdAndTime, statusById, sessionByIdAndTime } = getStatusMaps();
+  const isDueToday = (medicine: any) => {
+    if (!medicine.schedules || medicine.schedules.length === 0) {
+  return false;
+}
+  const today = new Date();
 
-    const entries: any[] = [];
+  const dayName = today
+    .toLocaleDateString("en-US", { weekday: "long" })
+    .toUpperCase();
 
-    safeMedicines.filter(isMedicineActiveToday).forEach((medicine: any) => {
-      const schedules = Array.isArray(medicine.schedules) && medicine.schedules.length > 0
-        ? medicine.schedules
-        : [{ scheduleTime: '' }];
+  // DAILY always shows
+  if (medicine.frequencyType === "DAILY") {
+    return true;
+  }
 
-      schedules.filter((schedule: any) => schedule.isActive !== false).forEach((schedule: any) => {
-        const rawTime = normalizeTime(schedule.scheduleTime || '');
-        const status = statusByIdAndTime.get(`${medicine.id}|${rawTime}`)
-          || statusById.get(medicine.id)
-          || 'PENDING';
-        const sessionId = sessionByIdAndTime.get(`${medicine.id}|${rawTime}`);
+  // INTERVAL always shows
+  if (medicine.frequencyType === "INTERVAL") {
+    return true;
+  }
 
-        entries.push({
-          medicineId: medicine.id,
-          userMedicineId: medicine.id,
-          sessionId,
-          medicineName: medicine.medicineName,
-          medicineType: medicine.medicineType || 'TABLET',
-          intakeInstruction: medicine.intakeInstruction || '',
-          category: medicine.medicineCategory || 'ROUTINE',
-          reminderTime: formatDisplayTime(rawTime),
-          rawScheduleTime: rawTime,
-          period: getPeriodFromTime(rawTime),
-          status,
-          frequencyType: medicine.frequencyType,
-        });
-      });
+  // WEEKLY / CUSTOM check day match
+  if (
+    medicine.frequencyType === "WEEKLY" ||
+    medicine.frequencyType === "CUSTOM"
+  ) {
+    return medicine.schedules?.some(
+      (s: any) =>
+        s.isActive !== false &&
+        s.dayOfWeek === dayName
+    );
+  }
+
+  return true;
+};
+
+
+
+ const buildTodayMedicineEntries = () => {
+  const safeMedicines = Array.isArray(allMedicines) ? allMedicines : [];
+  const { statusByIdAndTime, statusById, sessionByIdAndTime } = getStatusMaps();
+
+  const entries: any[] = [];
+
+  safeMedicines
+    .filter(isMedicineActiveToday)
+    .filter(isDueToday)
+    .forEach((medicine: any) => {
+      if (!medicine.schedules || medicine.schedules.length === 0) {
+  return;
+}
+
+const schedules = medicine.schedules;
+
+      schedules
+        .filter((schedule: any) => schedule.isActive !== false)
+        .forEach((schedule: any) => {
+          const rawTime = normalizeTime(schedule.scheduleTime || "");
+
+          const status =
+            statusByIdAndTime.get(`${medicine.id}|${rawTime}`) ||
+            statusById.get(medicine.id) ||
+            "PENDING";
+
+          const sessionId =
+            sessionByIdAndTime.get(`${medicine.id}|${rawTime}`);
+
+       entries.push({
+  medicineId: medicine.id,
+  userMedicineId: medicine.id,
+  sessionId,
+
+  medicineName: medicine.medicineName,
+  diseaseName: medicine.diseaseName,
+  userDiseaseId: medicine.userDiseaseId,
+
+  medicineType: medicine.medicineType || "TABLET",
+  intakeInstruction: medicine.intakeInstruction || "",
+
+  category: medicine.medicineCategory || "ROUTINE",
+
+  reminderTime: formatDisplayTime(rawTime),
+  rawScheduleTime: rawTime,
+
+  period: getPeriodFromTime(rawTime),
+
+  status,
+  frequencyType: medicine.frequencyType,
+});      });
     });
 
-    return entries.sort((a, b) => {
-      if (a.rawScheduleTime === b.rawScheduleTime) return 0;
-      if (!a.rawScheduleTime) return -1;
-      if (!b.rawScheduleTime) return 1;
-      return a.rawScheduleTime.localeCompare(b.rawScheduleTime);
-    });
-  };
+  return entries.sort((a, b) => {
+    if (a.rawScheduleTime === b.rawScheduleTime) return 0;
+    if (!a.rawScheduleTime) return -1;
+    if (!b.rawScheduleTime) return 1;
+    return a.rawScheduleTime.localeCompare(b.rawScheduleTime);
+  });
+};
 
   // FETCH INTEGRATED DATA
   const fetchScreenData = async () => {
@@ -340,13 +395,19 @@ export default function MedicineListScreen() {
       });
     });
 
-    try {
-      await apiClient.post(`/reminders/session/${sessionId}/medicines/${medicineId}/status`, {
-        status: actionStatus
-      });
-    } catch (error) {
-      console.log('Failed to log medicine update on backend:', error);
+   try {
+  await apiClient.post(
+    `/reminders/session/${sessionId}/medicines/${medicineId}/status`,
+    {
+      status: actionStatus
     }
+  );
+
+  await fetchScreenData(); // <-- add this
+
+} catch (error) {
+  console.log('Failed to log medicine update on backend:', error);
+}
   };
 
   // ASKS THE USER TO CONFIRM THE STATUS UPDATE
@@ -389,6 +450,21 @@ export default function MedicineListScreen() {
   const getMedicineColor = (index: number) => MEDICINE_COLORS[index % MEDICINE_COLORS.length];
   const getMedicineIconColor = (index: number) => MEDICINE_ICON_COLORS[index % MEDICINE_ICON_COLORS.length];
 
+  const groupedRoutineMedicines = todayRoutineReminders
+  .filter(m => m.period === activePeriod)
+  .reduce((acc: any, med: any) => {
+
+    const disease = med.diseaseName || "Routine";
+
+    if (!acc[disease]) {
+      acc[disease] = [];
+    }
+
+    acc[disease].push(med);
+
+    return acc;
+  }, {});
+
   // --- RENDERS THE INTERACTIVE WEB PREVIEW FRAME ---
   if (isWeb) {
     return (
@@ -420,6 +496,10 @@ export default function MedicineListScreen() {
             ))}
           </div>
 
+          <div className="px-4 pt-4 pb-2">
+            <h3 className="text-base font-bold text-[#0B1F3A]">Today Medicine Tracker</h3>
+          </div>
+
           {/* Main List */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-24">
             
@@ -427,21 +507,17 @@ export default function MedicineListScreen() {
             {activeFilter === 'All' && (
               <div className="space-y-4">
                 
-                {/* 1. Quick Medicines Section */}
-                <div className="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm">
+                {/* Quick Medicines Card - summary only. Full management moved to QuickMedicinesScreen */}
+                <div className="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm flex flex-col">
                   <div className="flex justify-between items-center mb-4">
                     <span className="flex items-center text-sm font-extrabold text-[#0B1F3A]"><span className="mr-2">⚡</span>Quick Medicines</span>
-                    <div className="flex space-x-3 text-[10px] font-bold text-slate-400">
-                      <span className="text-[#289254]">✓ Taken</span>
-                      <span className="text-red-500">✗ Missed</span>
-                      <span>⊖ Skip</span>
-                    </div>
+                    <button onClick={() => navigation.navigate('QuickMedicines')} className="text-sm text-[#289254] font-bold">View All</button>
                   </div>
 
                   <div className="space-y-3">
-                    {todayQuickReminders.length > 0 ? (
-                      todayQuickReminders.map((med, index) => (
-                        <div key={`${med.medicineId}-${med.rawScheduleTime}`} className="flex justify-between items-center py-2 border-b border-slate-50 last:border-0">
+                    {quickCatalog.slice(0,3).length > 0 ? (
+                      quickCatalog.slice(0,3).map((med, index) => (
+                        <div key={med.id} className="flex justify-between items-center py-2 border-b border-slate-50 last:border-0">
                           <div className="flex items-center space-x-3">
                             <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center text-[#289254] text-lg">💊</div>
                             <div>
@@ -449,16 +525,11 @@ export default function MedicineListScreen() {
                               <p className="text-[10px] text-slate-400 font-semibold">{med.medicineType}</p>
                             </div>
                           </div>
-                          {/* Instant Action buttons with Confirm prompts */}
-                          <div className="flex space-x-2">
-                            <button onClick={() => confirmAndMarkDose(med.sessionId, med.userMedicineId, med.medicineName, 'TAKEN')} className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${med.status === 'TAKEN' ? 'bg-emerald-500 text-white' : 'bg-slate-100 border border-slate-200 text-slate-500'}`}>✓</button>
-                            <button onClick={() => confirmAndMarkDose(med.sessionId, med.userMedicineId, med.medicineName, 'MISSED')} className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${med.status === 'MISSED' ? 'bg-red-500 text-white' : 'bg-slate-100 border border-slate-200 text-slate-500'}`}>✗</button>
-                            <button onClick={() => confirmAndMarkDose(med.sessionId, med.userMedicineId, med.medicineName, 'SKIPPED')} className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${med.status === 'SKIPPED' ? 'bg-slate-400 text-white' : 'bg-slate-100 border border-slate-200 text-slate-500'}`}>⊖</button>
-                          </div>
+                          <div className="text-xs text-slate-400">{med.intakeInstruction || ''}</div>
                         </div>
                       ))
                     ) : (
-                      <p className="text-xs text-slate-400 text-center py-4">No quick medicines scheduled for today.</p>
+                      <p className="text-xs text-slate-400 text-center py-4">No quick medicines in your catalog.</p>
                     )}
                   </div>
                 </div>
@@ -495,28 +566,136 @@ export default function MedicineListScreen() {
                   </div>
 
                   <div className="space-y-3">
-                    {todayRoutineReminders.filter(m => m.period === activePeriod).length > 0 ? (
-                      todayRoutineReminders.filter(m => m.period === activePeriod).map(med => (
-                        <div key={`${med.medicineId}-${med.rawScheduleTime}`} className="grid grid-cols-12 items-center py-2 border-b border-slate-50 last:border-0">
-                          <div className="col-span-6">
-                            <h4 className="text-xs font-bold text-[#0B1F3A]">{med.medicineName}</h4>
-                            <p className="text-[9px] text-slate-400 font-semibold">{med.intakeInstruction}</p>
-                          </div>
-                          <div className="col-span-2 flex justify-center">
-                            <div onClick={() => confirmAndMarkDose(med.sessionId, med.userMedicineId, med.medicineName, 'TAKEN')} className={`w-5 h-5 rounded-full border-2 cursor-pointer flex items-center justify-center ${med.status === 'TAKEN' ? 'bg-[#289254] border-[#289254] text-white text-[9px]' : 'border-slate-300'}`}>✓</div>
-                          </div>
-                          <div className="col-span-2 flex justify-center">
-                            <div onClick={() => confirmAndMarkDose(med.sessionId, med.userMedicineId, med.medicineName, 'MISSED')} className={`w-5 h-5 rounded-full border-2 cursor-pointer flex items-center justify-center ${med.status === 'MISSED' ? 'bg-red-500 border-red-500 text-white text-[9px]' : 'border-slate-300'}`}>✗</div>
-                          </div>
-                          <div className="col-span-2 flex justify-center">
-                            <div onClick={() => confirmAndMarkDose(med.sessionId, med.userMedicineId, med.medicineName, 'SKIPPED')} className={`w-5 h-5 rounded-full border-2 cursor-pointer flex items-center justify-center ${med.status === 'SKIPPED' ? 'bg-slate-400 border-slate-400 text-white text-[9px]' : 'border-slate-300'}`}>⊖</div>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-xs text-slate-400 text-center py-4">No routine medicines scheduled for the {activePeriod.toLowerCase()}.</p>
-                    )}
-                  </div>
+
+  {todayRoutineReminders.filter(m => m.period === activePeriod).length > 0 ? (
+
+    Object.entries(
+      todayRoutineReminders
+        .filter(m => m.period === activePeriod)
+        .reduce((acc: any, med: any) => {
+
+          console.log("ROUTINE DATA");
+console.log(todayRoutineReminders);
+
+          const diseaseName =
+            med.diseaseName ||
+            med.disease ||
+            "Other";
+
+          if (!acc[diseaseName]) {
+            acc[diseaseName] = [];
+          }
+
+          acc[diseaseName].push(med);
+
+          return acc;
+
+        }, {})
+    ).map(([diseaseName, medicines]: any) => (
+
+      <div key={diseaseName} className="mb-4">
+
+        <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 mb-2">
+          <h3 className="text-sm font-bold text-blue-900">
+            🩺 {diseaseName}
+          </h3>
+        </div>
+
+        {medicines.map((med: any) => (
+
+          <div
+            key={`${med.medicineId}-${med.rawScheduleTime}`}
+            className="grid grid-cols-12 items-center py-2 border-b border-slate-50 last:border-0"
+          >
+
+            <div className="col-span-6">
+              <h4 className="text-xs font-bold text-[#0B1F3A]">
+                {med.medicineName}
+              </h4>
+
+              <p className="text-[9px] text-slate-400 font-semibold">
+                {med.intakeInstruction}
+              </p>
+            </div>
+
+            <div className="col-span-2 flex justify-center">
+              <div
+                onClick={() =>
+                  confirmAndMarkDose(
+                    med.sessionId,
+                    med.userMedicineId,
+                    med.medicineName,
+                    "TAKEN"
+                  )
+                }
+                className={`w-5 h-5 rounded-full border-2 cursor-pointer flex items-center justify-center ${
+                  med.status === "TAKEN"
+                    ? "bg-[#289254] border-[#289254] text-white text-[9px]"
+                    : "border-slate-300"
+                }`}
+              >
+                ✓
+              </div>
+            </div>
+
+            <div className="col-span-2 flex justify-center">
+              <div
+                onClick={() =>
+                  confirmAndMarkDose(
+                    med.sessionId,
+                    med.userMedicineId,
+                    med.medicineName,
+                    "MISSED"
+                  )
+                }
+                className={`w-5 h-5 rounded-full border-2 cursor-pointer flex items-center justify-center ${
+                  med.status === "MISSED"
+                    ? "bg-red-500 border-red-500 text-white text-[9px]"
+                    : "border-slate-300"
+                }`}
+              >
+                ✗
+              </div>
+            </div>
+
+            <div className="col-span-2 flex justify-center">
+              <div
+                onClick={() =>
+                  confirmAndMarkDose(
+                    med.sessionId,
+                    med.userMedicineId,
+                    med.medicineName,
+                    "SKIPPED"
+                  )
+                }
+                className={`w-5 h-5 rounded-full border-2 cursor-pointer flex items-center justify-center ${
+                  med.status === "SKIPPED"
+                    ? "bg-slate-400 border-slate-400 text-white text-[9px]"
+                    : "border-slate-300"
+                }`}
+              >
+                ⊖
+              </div>
+            </div>
+
+          </div>
+
+        ))}
+
+      </div>
+
+    ))
+
+  ) : (
+
+    <p className="text-xs text-slate-400 text-center py-4">
+      No routine medicines scheduled for the {activePeriod.toLowerCase()}.
+    </p>
+    
+
+  )}
+
+</div>
                 </div>
 
               </div>
@@ -588,13 +767,23 @@ export default function MedicineListScreen() {
           <TouchableOpacity
             key={tab}
             style={[styles.filterTab, activeFilter === tab && styles.filterTabActive]}
-            onPress={() => setActiveFilter(tab)}
+            onPress={() => {
+              if (tab === 'Quick') {
+                navigation.navigate('QuickMedicines');
+                return;
+              }
+              setActiveFilter(tab);
+            }}
           >
             <Text style={[styles.filterTabText, activeFilter === tab && styles.filterTabTextActive]}>
               {tab}
             </Text>
           </TouchableOpacity>
         ))}
+      </View>
+
+      <View style={styles.sectionHeading}>
+        <Text style={styles.sectionHeadingText}>Today Medicine Tracker</Text>
       </View>
 
       <ScrollView
@@ -712,59 +901,157 @@ export default function MedicineListScreen() {
                 <Text style={[styles.tableHeaderTxt, { color: '#9CA3AF', width: 44, textAlign: 'center' }]}>Skip</Text>
               </View>
 
-              {todayRoutineReminders.filter(m => m.period === activePeriod).length > 0 ? (
-                todayRoutineReminders.filter(m => m.period === activePeriod).map((med: any) => (
-                  <View key={`${med.medicineId}-${med.rawScheduleTime}`} style={styles.routineRow}>
-                    <View style={styles.routineLeft}>
-                      <Text style={styles.routineMedName}>{med.medicineName}</Text>
-                      <Text style={styles.routineMedSub}>
-                        1 {med.medicineType.charAt(0) + med.medicineType.slice(1).toLowerCase()}
-                        {med.intakeInstruction ? ` • ${med.intakeInstruction.replace(/_/g, ' ')}` : ''}
-                      </Text>
-                    </View>
+             {todayRoutineReminders.filter(m => m.period === activePeriod).length > 0 ? (
 
-                    <View style={styles.routineActions}>
-                      <TouchableOpacity
-                        style={styles.routineActionBtn}
-                        onPress={() => confirmAndMarkDose(med.sessionId, med.userMedicineId, med.medicineName, 'TAKEN')}
-                      >
-                        <View style={[
-                          styles.routineCircle,
-                          med.status === 'TAKEN' && { backgroundColor: GREEN, borderColor: GREEN }
-                        ]}>
-                          {med.status === 'TAKEN' && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
-                        </View>
-                      </TouchableOpacity>
+  Object.entries(
+    todayRoutineReminders
+      .filter(m => m.period === activePeriod)
+      .reduce((acc: any, med: any) => {
 
-                      <TouchableOpacity
-                        style={styles.routineActionBtn}
-                        onPress={() => confirmAndMarkDose(med.sessionId, med.userMedicineId, med.medicineName, 'MISSED')}
-                      >
-                        <View style={[
-                          styles.routineCircle,
-                          med.status === 'MISSED' && { backgroundColor: '#EF4444', borderColor: '#EF4444' }
-                        ]}>
-                          {med.status === 'MISSED' && <Ionicons name="close" size={14} color="#FFFFFF" />}
-                        </View>
-                      </TouchableOpacity>
+        const diseaseName =
+          med.diseaseName ||
+          med.disease ||
+          "Routine";
 
-                      <TouchableOpacity
-                        style={styles.routineActionBtn}
-                        onPress={() => confirmAndMarkDose(med.sessionId, med.userMedicineId, med.medicineName, 'SKIPPED')}
-                      >
-                        <View style={[
-                          styles.routineCircle,
-                          med.status === 'SKIPPED' && { backgroundColor: '#9CA3AF', borderColor: '#9CA3AF' }
-                        ]}>
-                          {med.status === 'SKIPPED' && <Ionicons name="remove" size={14} color="#FFFFFF" />}
-                        </View>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                ))
-              ) : (
-                <Text style={styles.emptySubtitleText}>No Routine medicines scheduled for the {activePeriod.toLowerCase()}.</Text>
-              )}
+        if (!acc[diseaseName]) {
+          acc[diseaseName] = [];
+        }
+
+        acc[diseaseName].push(med);
+
+        return acc;
+
+      }, {})
+  ).map(([diseaseName, medicines]: any) => (
+
+    <View key={diseaseName} style={{ marginBottom: 16 }}>
+
+      <Text
+        style={{
+          fontSize: 14,
+          fontWeight: '700',
+          color: GREEN,
+          marginBottom: 8,
+        }}
+      >
+        🩺 {diseaseName}
+      </Text>
+
+      {medicines.map((med: any) => (
+
+  <View
+    key={`${med.medicineId}-${med.rawScheduleTime}`}
+    style={styles.routineRow}
+  >
+
+    <View style={styles.routineLeft}>
+      <Text style={styles.routineMedName}>
+        {med.medicineName}
+      </Text>
+
+      <Text style={styles.routineMedSub}>
+        1 {med.medicineType.charAt(0) + med.medicineType.slice(1).toLowerCase()}
+        {med.intakeInstruction
+          ? ` • ${med.intakeInstruction.replace(/_/g, ' ')}`
+          : ''}
+      </Text>
+    </View>
+
+    <View style={styles.actionRow}>
+
+      <TouchableOpacity
+  style={styles.actionBtn}
+  onPress={() =>
+    confirmAndMarkDose(
+      med.sessionId,
+      med.userMedicineId,
+      med.medicineName,
+      'TAKEN'
+    )
+  }
+>
+  <Ionicons
+    name={
+      med.status === 'TAKEN'
+        ? 'checkmark-circle'
+        : 'checkmark-circle-outline'
+    }
+    size={26}
+    color={
+      med.status === 'TAKEN'
+        ? GREEN
+        : '#D1D5DB'
+    }
+  />
+</TouchableOpacity>
+
+      <TouchableOpacity
+  style={styles.actionBtn}
+  onPress={() =>
+    confirmAndMarkDose(
+      med.sessionId,
+      med.userMedicineId,
+      med.medicineName,
+      'MISSED'
+    )
+  }
+>
+  <Ionicons
+    name={
+      med.status === 'MISSED'
+        ? 'close-circle'
+        : 'close-circle-outline'
+    }
+    size={26}
+    color={
+      med.status === 'MISSED'
+        ? '#EF4444'
+        : '#D1D5DB'
+    }
+  />
+</TouchableOpacity>
+
+     <TouchableOpacity
+  style={styles.actionBtn}
+  onPress={() =>
+    confirmAndMarkDose(
+      med.sessionId,
+      med.userMedicineId,
+      med.medicineName,
+      'SKIPPED'
+    )
+  }
+>
+  <Ionicons
+    name={
+      med.status === 'SKIPPED'
+        ? 'remove-circle'
+        : 'remove-circle-outline'
+    }
+    size={26}
+    color={
+      med.status === 'SKIPPED'
+        ? '#9CA3AF'
+        : '#D1D5DB'
+    }
+  />
+</TouchableOpacity>
+
+        </View>
+
+      </View>))}
+
+    </View>
+
+  ))
+
+) : (
+
+  <Text style={styles.emptyText}>
+    No routine medicines scheduled for the {activePeriod.toLowerCase()}.
+  </Text>
+
+)}
             </View>
           </View>
         )}
@@ -844,8 +1131,20 @@ const styles: any = {
 
   filterTabRow: {
     flexDirection: 'row', backgroundColor: '#FFFFFF',
-    paddingHorizontal: 16, paddingBottom: 12, gap: 8,
+    paddingHorizontal: 16, paddingTop: 18, paddingBottom: 18, gap: 8,
     borderBottomWidth: 0.5, borderBottomColor: '#E5E7EB',
+    marginTop: 16,
+    marginBottom: 12,
+  },
+  sectionHeading: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 14,
+  },
+  sectionHeadingText: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#0B1F3A',
   },
   filterTab: {
     paddingHorizontal: 20, paddingVertical: 8,
@@ -920,23 +1219,48 @@ const styles: any = {
   routineLeft: { flex: 1 },
   routineMedName: { fontSize: 13, fontWeight: '600', color: '#0B1F3A' },
   routineMedSub: { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
-  routineActions: { flexDirection: 'row' },
-  routineActionBtn: { width: 48, alignItems: 'center' },
-  routineCircle: {
-    width: 26, height: 26, borderRadius: 13,
-    borderWidth: 1.5, borderColor: '#D1D5DB',
-    justifyContent: 'center', alignItems: 'center',
-  },
+ 
 
   emptySubtitleText: {
     fontSize: 12, color: '#9CA3AF', textAlign: 'center', marginVertical: 16, fontWeight: '500'
   },
 
   fab: {
-    position: 'absolute', bottom: 90, right: 20,
+    position: 'absolute', bottom: 24, right: 20,
     width: 56, height: 56, borderRadius: 28,
     backgroundColor: GREEN,
     justifyContent: 'center', alignItems: 'center',
     elevation: 4,
   },
+
+  circleBtn: {
+  width: 26,
+  height: 26,
+  borderRadius: 13,
+  borderWidth: 1.5,
+  borderColor: '#D1D5DB',
+  justifyContent: 'center',
+  alignItems: 'center',
+},
+
+takenCircle: {
+  backgroundColor: GREEN,
+  borderColor: GREEN,
+},
+
+missedCircle: {
+  backgroundColor: '#ef4444',
+  borderColor: '#ef4444',
+},
+
+skippedCircle: {
+  backgroundColor: '#9CA3AF',
+  borderColor: '#9CA3AF',
+},
+
+circleText: {
+  color: '#FFFFFF',
+  fontSize: 12,
+  fontWeight: '700',
+},
 };

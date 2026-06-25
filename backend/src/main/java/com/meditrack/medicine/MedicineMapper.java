@@ -1,17 +1,48 @@
 package com.meditrack.medicine;
 
+import com.meditrack.disease.DiseaseDTO;
+import com.meditrack.disease.DiseaseService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+
 import java.util.List;
 import java.util.stream.Collectors;
 
 @Component
+@RequiredArgsConstructor
 public class MedicineMapper {
 
-    public MedicineResponseDTO toResponse(Medicine medicine, List<MedicineSchedule> schedules) {
+    private final DiseaseService diseaseService;
+
+    public MedicineResponseDTO toResponse(
+            Medicine medicine,
+            List<MedicineSchedule> schedules
+    ) {
+
+        String diseaseName = null;
+
+        if (medicine.getUserDiseaseId() != null) {
+            try {
+                DiseaseDTO disease =
+                        diseaseService.getDiseaseById(
+                                medicine.getUserDiseaseId()
+                        );
+
+                diseaseName = disease.getDiseaseName();
+
+            } catch (Exception e) {
+                diseaseName = null;
+            }
+        }
+
+
         return MedicineResponseDTO.builder()
                 .id(medicine.getId())
                 .userId(medicine.getUserId())
+
                 .userDiseaseId(medicine.getUserDiseaseId())
+                .diseaseName(diseaseName)
+
                 .medicineName(medicine.getMedicineName())
                 .medicineCategory(medicine.getMedicineCategory())
                 .medicineType(medicine.getMedicineType())
@@ -21,13 +52,21 @@ public class MedicineMapper {
                 .endDate(medicine.getEndDate())
                 .status(medicine.getStatus())
                 .notes(medicine.getNotes())
-                .schedules(schedules.stream()
-                        .map(this::toScheduleResponse)
-                        .collect(Collectors.toList()))
+
+                .schedules(
+                        schedules.stream()
+                                .map(this::toScheduleResponse)
+                                .collect(Collectors.toList())
+                )
+
                 .build();
     }
 
-    public MedicineResponseDTO.ScheduleResponseDTO toScheduleResponse(MedicineSchedule s) {
+
+    public MedicineResponseDTO.ScheduleResponseDTO toScheduleResponse(
+            MedicineSchedule s
+    ) {
+
         return MedicineResponseDTO.ScheduleResponseDTO.builder()
                 .id(s.getId())
                 .scheduleTime(s.getScheduleTime().toString())
