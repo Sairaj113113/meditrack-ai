@@ -29,5 +29,7 @@ public class CreateRoutineDTO {
 
     private Boolean isReminderEnabled;
 
+    private String diseaseName;
+
     private List<DayOfWeekType> days;
 }

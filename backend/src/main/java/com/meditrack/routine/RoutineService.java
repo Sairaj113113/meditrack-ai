@@ -15,9 +15,12 @@ import com.meditrack.enums.MedicineStatus;
 import com.meditrack.medicine.MedicineScheduleRepository;
 import com.meditrack.medicine.UserMedicine;
 import com.meditrack.medicine.UserMedicineRepository;
+import com.meditrack.disease.DiseaseDTO;
 import com.meditrack.disease.UserDisease;
 import com.meditrack.medicine.MedicineSchedule;
 import com.meditrack.enums.ScheduleType;
+
+import com.meditrack.disease.DiseaseService;
 
 
 @Service
@@ -31,48 +34,68 @@ public class RoutineService {
     private final UserDiseaseRepository userDiseaseRepository;
     private final MedicineScheduleRepository medicineScheduleRepository;
 
-    public RoutineResponseDTO createRoutine(
-            CreateRoutineDTO request,
-            String userId
-    ) {
+    private final DiseaseService diseaseService;
 
-        RoutineGroup routine =
-                RoutineMapper.toEntity(request, userId);
 
-        routine.setStatus(RoutineStatus.ACTIVE);
 
-        if (routine.getIsReminderEnabled() == null) {
-            routine.setIsReminderEnabled(true);
-        }
+public RoutineResponseDTO createRoutine(
+        CreateRoutineDTO request,
+        String userId
+) {
 
-        RoutineGroup savedRoutine =
-                routineGroupRepository.save(routine);
+    // Resolve disease
+    String diseaseId = request.getUserDiseaseId();
 
-        if (request.getDays() != null &&
-                !request.getDays().isEmpty()) {
+    if (request.getDiseaseName() != null &&
+            !request.getDiseaseName().trim().isEmpty()) {
 
-            List<RoutineGroupDay> days =
-                    request.getDays()
-                            .stream()
-                            .map(day ->
-                                    RoutineGroupDay.builder()
-                                            .routineGroupId(savedRoutine.getId())
-                                            .dayOfWeek(day)
-                                            .build())
-                            .toList();
+        DiseaseDTO disease = diseaseService.createQuickDisease(
+                userId,
+                request.getDiseaseName().trim()
+        );
 
-            routineGroupDayRepository.saveAll(days);
-        }
-return RoutineMapper.toResponse(
-        savedRoutine,
-        getDiseaseName(
-                savedRoutine.getUserDiseaseId()
-        ),
-        0
-);
-
-        
+        diseaseId = disease.getId();
     }
+
+    request.setUserDiseaseId(diseaseId);
+
+    // Create Routine Group
+    RoutineGroup routine =
+            RoutineMapper.toEntity(request, userId);
+
+    routine.setStatus(RoutineStatus.ACTIVE);
+
+    if (routine.getIsReminderEnabled() == null) {
+        routine.setIsReminderEnabled(true);
+    }
+
+    RoutineGroup savedRoutine =
+            routineGroupRepository.save(routine);
+
+    // Save Weekly/Custom Days
+    if (request.getDays() != null &&
+            !request.getDays().isEmpty()) {
+
+        List<RoutineGroupDay> days =
+                request.getDays()
+                        .stream()
+                        .map(day ->
+                                RoutineGroupDay.builder()
+                                        .routineGroupId(savedRoutine.getId())
+                                        .dayOfWeek(day)
+                                        .build())
+                        .toList();
+
+        routineGroupDayRepository.saveAll(days);
+    }
+
+    // Return Response
+    return RoutineMapper.toResponse(
+            savedRoutine,
+            getDiseaseName(savedRoutine.getUserDiseaseId()),
+            0
+    );
+}
 
     @Transactional(readOnly = true)
     public List<RoutineResponseDTO> getAllRoutines(
